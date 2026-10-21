@@ -10,7 +10,7 @@ from birdlab import load_predictor, predict_image
 ROOT = Path(__file__).resolve().parent
 st.set_page_config(page_title="CUB-200 Bird Classifier", page_icon="🐦", layout="wide")
 st.title("🐦 Bird Species Classification")
-st.caption("COS30082 · MobileNetV3 / EfficientNetV2-S · 200 bird species")
+st.caption("COS30082 · MobileNetV1 / EfficientNetV2-S · 200 bird species")
 
 
 @st.cache_resource(max_entries=2)
@@ -57,13 +57,15 @@ with tab_experiments:
     if comparison.exists():
         frame = pd.read_csv(comparison)
         view = frame[["architecture", "experiment", "val_top1", "val_average_per_class",
-                      "delta_vs_baseline_pp", "gap", "best_epoch"]].copy()
+                      "delta_vs_baseline_pp", "delta_vs_previous_pp", "gap", "best_epoch"]].copy()
         for column in ["val_top1", "val_average_per_class", "gap"]:
             view[column] *= 100
-        st.write("Validation results (%) and change from baseline (percentage points)")
+        st.write("Paired cumulative stages: validation results (%) and changes (percentage points)")
         st.dataframe(view.round(3), hide_index=True, width="stretch")
         st.bar_chart(frame.pivot(index="experiment", columns="architecture", values="val_top1") * 100)
         st.bar_chart(frame.pivot(index="experiment", columns="architecture", values="delta_vs_baseline_pp"))
+        st.write("Change from the previous recipe (pp); negative values are retained")
+        st.bar_chart(frame.pivot(index="experiment", columns="architecture", values="delta_vs_previous_pp"))
         st.download_button("Download experiment results", comparison.read_bytes(),
                            "comparison.csv", "text/csv")
         run = st.selectbox("Learning curves", frame.checkpoint.tolist())

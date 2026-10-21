@@ -28,22 +28,34 @@ Dataset: the assignment-provided CUB-200 subset, not a newly downloaded split.
 
 ## Experiments
 
-Two architectures: **MobileNetV3-Large** and **EfficientNetV2-S**. Each has eight
-independent variants: baseline, geometry, color, grayscale, dropout, weight decay,
-label smoothing, and a combined recipe. This is 16 training runs over only two
-architectures. Each starts from the same architecture's ImageNet weights and seed.
+Two architectures: **MobileNetV1 (width 1.0)** and **EfficientNetV2-S**.
+Nine cumulative recipes: frozen-backbone baseline, then add backbone fine-tuning,
+geometry, color, dropout, weight decay, label smoothing, random erasing and grayscale.
+Each notebook stage trains BOTH architectures before comparing them: 18 runs.
+Each recipe retains all earlier settings but restarts from the same architecture's
+ImageNet weights and seed, rather than receiving extra epochs from an earlier run.
 If the teacher's two-model limit means **two training runs total**, confirm that
-interpretation before running the ablation matrix: isolated ablation evidence
-requires multiple training runs of the same architecture.
+interpretation before running the recipe sequence: controlled comparisons
+require multiple training runs of the same architecture.
 
-All runs share the data split, epoch budget, learning rate schedule, frozen
-BatchNorm running statistics, classifier warm-up, and validation early stopping.
-Single-factor variants are compared with their own baseline. The combined recipe
-also includes random erasing; its isolated contribution is not measured.
-No guarantee is made that an augmentation improves accuracy.
+All recipes share the split, epoch budget, schedule, BatchNorm running-statistics
+policy and validation early stopping. Stage 0 only trains the classifier; later
+stages fine-tune after two classifier warm-up epochs. A baseline of 20-40% is an
+expectation, not a guarantee or an enforced stopping target. Improvements can be
+negative. Report both change from the previous recipe and total change from the
+baseline; this cumulative design does not measure each method in isolation.
+
+MobileNetV1 uses `timm==1.0.27`, model `mobilenetv1_100.ra4_e3600_r224_in1k`.
+It contains depthwise/pointwise blocks, global average pooling and a linear head.
+Public pretrained weights are downloaded once and cached locally. No hosting
+account is required. MobileNetV1 mean/std is 0.5; EfficientNetV2-S uses its ImageNet
+mean/std, preserved consistently in loaders and deployment. Different ImageNet
+pretraining recipes limit claims that performance differences are architectural alone.
 
 Default: 224px, batch 8, gradient accumulation 4, mixed precision, 15 epochs max
-(2 head-only), backbone/head LR 3e-5/3e-4. Windows DataLoader workers = 0.
+(2 head-only warm-up in fine-tuning recipes), backbone/head LR 3e-5/3e-4.
+AMP starts at scale 128 for numerical stability and adjusts dynamically.
+Windows DataLoader workers = 0.
 The fixed low resolution is a documented compromise for 4 GB VRAM.
 On CUDA OOM, restart the kernel and set batch 4 / accumulation 8 with a new
 `output_dir`. Full experiments can take hours; check the first baseline first.
@@ -66,7 +78,7 @@ Use a new output directory for a new pre-test study; test results already seen
 cannot become an unbiased validation source merely by changing the directory.
 
 `artifacts/` contains split/configuration records, epoch histories, best/last
-checkpoints, accuracy/delta plots, `comparison.csv`, and final test metrics,
+checkpoints, stage accuracy/delta plots, `comparison.csv`, `paired_comparison.csv`, and final test metrics,
 per-class CSVs, confusion matrices and prediction examples. `last.pth` supports
 continuation from the last finished epoch, including optimizer/scaler/RNG state.
 Interrupted partially completed epochs are replayed. Completed experiments skip.
@@ -110,7 +122,8 @@ Rebuild after training. Submit a separate report PDF and video link as required.
 
 - Assignment brief: `Assignment1_v2.pdf`, pages 1-3.
 - [Official paired PyTorch / torchvision CUDA wheels](https://pytorch.org/get-started/previous-versions/).
-- [MobileNetV3 documentation](https://docs.pytorch.org/vision/stable/models/mobilenetv3.html).
+- [MobileNetV1 paper](https://arxiv.org/abs/1704.04861).
+- [MobileNetV1 pretrained model card](https://huggingface.co/timm/mobilenetv1_100.ra4_e3600_r224_in1k).
 - [EfficientNetV2 documentation](https://docs.pytorch.org/vision/stable/models/efficientnetv2.html).
 - [NVIDIA CUDA driver compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html).
 

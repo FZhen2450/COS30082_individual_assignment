@@ -1,4 +1,4 @@
-"""Generate the readable local notebook; source logic lives in birdlab.py."""
+"""Generate paired cumulative MobileNetV1 / EfficientNetV2 experiments."""
 from pathlib import Path
 import nbformat as nbf
 
@@ -15,67 +15,73 @@ def code(source):
 
 
 md('''
-# COS30082 Assignment 1 - Local GPU Bird Classification
+# COS30082 - MobileNetV1 vs EfficientNetV2-S, step by step
 
 **Student name:** TODO &nbsp; **Student ID:** TODO
 
-This replaces the mixed Colab/TensorFlow/PyTorch workflow with one local PyTorch
-pipeline. Keep `birdlab.py` beside this notebook. Original files are preserved.
+Two architectures only: width-1.0 **MobileNetV1** and **EfficientNetV2-S**.
+MobileNetV1 uses depthwise + pointwise convolutions, global average pooling and
+a 200-class linear head.
 
-**Two architectures only:** MobileNetV3-Large and EfficientNetV2-S.
-Each architecture has independent baseline / ablation runs; these are variants,
-not additional architectures. Every run starts with the same pretrained weights
-and seed. Never intentionally degrade the baseline or invent improvements.
+Run each stage cell in order. It trains BOTH models using the same recipe, then
+shows their comparison. Each new recipe keeps ALL methods added previously.
+Recipes restart from their own architecture's same ImageNet weights and seed;
+they do not inherit the previous checkpoint. This controls for extra epochs.
 
-Read `ASSIGNMENT_GUIDE.md` for the submission checklist and experiment rationale.
+Baseline accuracy of 20-40% is a hope, not a setting or a guaranteed result.
+The baseline is legitimate frozen-backbone transfer learning. Scores may be
+above or below that range; every gain or decline is recorded honestly.
+
+Restart the kernel before running this revised workflow. Keep `birdlab.py` beside
+the notebook. See `ASSIGNMENT_GUIDE.md` for rubric and submission details.
 ''')
 md('''
-## 1. Select the local GPU environment
+## 1. Local GPU environment
 
-Run `powershell -ExecutionPolicy Bypass -File .\\setup_gpu.ps1` in a terminal once.
-In VS Code select `.venv\\Scripts\\python.exe` as this notebook's kernel, then
-restart the kernel. The system `python` on this machine is Python 2.7: do not use it.
-
-The project uses PyTorch 2.7.1 / torchvision 0.22.1 CUDA 11.8 wheels for the
-installed NVIDIA driver. See [official installation commands](https://pytorch.org/get-started/previous-versions/).
-No Google Drive, `/content`, TensorFlow, or `timm` is required.
+Run `powershell -ExecutionPolicy Bypass -File .\\setup_gpu.ps1` once, then select
+`.venv\\Scripts\\python.exe` as the kernel. The global `python` is Python 2.7.
+This project uses PyTorch CUDA 11.8 and `timm==1.0.27` for actual MobileNetV1.
+No Colab / Google Drive / TensorFlow is used. Public pretrained weights are
+cached locally; no hosted app or hosting account is required for training.
 ''')
 code('''
 import os
 import sys
 from pathlib import Path
-
 ROOT = Path.cwd().resolve()
-assert (ROOT / "birdlab.py").exists(), "Open the notebook from the assignment project folder."
-# Store downloaded ImageNet weights locally; no global cache changes.
-os.environ["TORCH_HOME"] = str(ROOT / ".cache" / "torch")
-os.environ["MPLCONFIGDIR"] = str(ROOT / ".cache" / "matplotlib")
-
+assert (ROOT / "birdlab.py").is_file(), "Open this notebook in the project folder."
+os.environ["TORCH_HOME"] = str(ROOT / ".cache/torch")
+os.environ["HF_HOME"] = str(ROOT / ".cache/huggingface")
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["MPLCONFIGDIR"] = str(ROOT / ".cache/matplotlib")
 import torch
 import torchvision
+import timm
 print("Python:", sys.executable)
-print("PyTorch:", torch.__version__, "Torchvision:", torchvision.__version__)
-print("CUDA available:", torch.cuda.is_available())
-assert torch.cuda.is_available(), "Run setup_gpu.ps1 and select the .venv kernel. CPU training is blocked by default."
+print("PyTorch:", torch.__version__, "torchvision:", torchvision.__version__, "timm:", timm.__version__)
+assert torch.cuda.is_available(), "Run setup_gpu.ps1 and select the .venv GPU kernel."
 print("GPU:", torch.cuda.get_device_name(0))
-print("VRAM (GiB):", round(torch.cuda.get_device_properties(0).total_memory / 2**30, 2))
-print("GPU calculation:", (torch.ones(8, device="cuda") ** 2).sum().item())
+print("VRAM GiB:", round(torch.cuda.get_device_properties(0).total_memory / 2**30, 2))
+print("GPU check:", torch.ones(8, device="cuda").sum().item())
 ''')
 md('''
-## 2. Settings for the RTX 3050 4 GB
+## 2. Common settings and cumulative recipe table
 
-Images are 224 x 224 for both models. EfficientNetV2-S normally has a larger
-recommended evaluation resolution; 224 is an explicit memory/accuracy tradeoff.
-Batch size 8 x 4 accumulated batches = nominal effective batch 32. AMP is on.
-If memory runs out, restart the kernel and use batch 4 / accumulation 8 in a
-**new output directory**. Close other GPU programs. `num_workers=0` is intentional
-for Windows notebooks and reproducible checkpoint continuation.
+Input 224px, batch 8, accumulation 4, AMP, Windows workers 0, max 15 epochs.
+Both models start with ImageNet-1k pretrained weights (different pretraining
+recipes; this is a comparison of available pretrained systems).
+MobileNetV1 expects mean/std 0.5; EfficientNetV2 uses ImageNet mean/std.
+The loaders and saved deployment metadata preserve each normalization.
 
-Each run uses 2 classifier-only epochs, then full fine-tuning (up to 15 total).
-All runs share the same scheduler, BatchNorm policy and validation-based early
-stopping; those common settings are not claimed as isolated ablation gains.
-Training runs sequentially and can take hours. Start with one baseline cell;
-do not run the full matrix unattended before checking its first learning curve.
+Stage 0 trains only the linear classifier for the whole run, with a frozen
+backbone. Stage 1 adds backbone fine-tuning after 2 head-only warm-up epochs.
+Stages 2-8 keep fine-tuning and cumulatively add one setting at a time.
+The seed, split, resolution, epoch budget, scheduler and BatchNorm policy stay
+fixed. Early stopping and checkpoint selection use validation only.
+
+18 runs total: 9 recipes x 2 architectures. Full training may take hours.
+On OOM, restart the kernel, use batch 4 / accumulation 8, and use a new study
+directory if any run has already been saved with different settings.
 ''')
 code('''
 import pandas as pd
@@ -83,150 +89,111 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from IPython.display import display
 from birdlab import (
-    ARCHITECTURES, Config, experiment_plan, prepare_data, make_transform,
-    seed_everything, train_experiment, results_table, plot_results,
-    plot_history, final_evaluation, load_predictor, predict_image,
+    ARCHITECTURES, Config, experiment_plan, prepare_data, normalization,
+    make_transform, seed_everything, train_stage, results_table,
+    paired_comparison, plot_results, plot_history, final_evaluation,
+    load_predictor, predict_image,
 )
-
 cfg = Config(
     data_root=str(ROOT), output_dir="artifacts", seed=42,
     image_size=224, batch_size=8, accumulation_steps=4, num_workers=0,
     epochs=15, head_epochs=2, patience=5,
-    backbone_lr=3e-5, head_lr=3e-4, require_gpu=True, pretrained=True,
+    backbone_lr=3e-5, head_lr=3e-4, pretrained=True, require_gpu=True,
 )
 plan = experiment_plan()
-display(pd.DataFrame([vars(experiment) for experiment in plan]))
+display(pd.DataFrame([vars(recipe) for recipe in plan]))
 ''')
 md('''
-## 3. Audit training data; create one grouped, stratified validation split
+## 3. Fixed validation split and data-quality audit
 
-The supplied annotations describe 4,829 training images and 200 classes. The
-official 1,204-image Test set is not used for selecting weights or augmentation.
-Approximately 80% of Train is used for fitting and 20% for validation.
-
-Byte-identical training groups are reserved for fit before stratifying unique images;
-some original labels conflict. These original labels are retained and documented,
-not silently corrected. The exact file lists and training content fingerprint
-are saved in `artifacts/split.json`. Changing the dataset/split requires a new
-study output directory. Original images are never modified.
+4,829 training images, 200 species. Reserve six ambiguous duplicate training
+rows for fit, then stratify unique images: 3,863 fit / 966 validation. Identical
+content never crosses partitions. Keep original labels and document conflicts.
+Save filenames and a content fingerprint in `artifacts/split.json`.
+Official Test (1,204 images) is not used for model selection or tuning.
 ''')
 code('''
 fit_df, val_df, class_names, manifest = prepare_data(cfg)
-print(f"Fit: {len(fit_df)} | Validation: {len(val_df)} | Species: {len(class_names)}")
 assert not set(fit_df.sha256) & set(val_df.sha256)
-print("Byte-identical train rows:", len(manifest["duplicate_training_rows"]))
+print("Fit:", len(fit_df), "Validation:", len(val_df), "Species:", len(class_names))
 display(pd.DataFrame(manifest["duplicate_training_rows"]))
 counts = pd.DataFrame({"fit": fit_df.label.value_counts(), "validation": val_df.label.value_counts()}).sort_index()
 display(counts.describe())
-counts.plot(figsize=(12, 3), title="Examples per class (fit / validation)", xlabel="Class ID", ylabel="Images")
+counts.plot(figsize=(12, 3), xlabel="Class ID", ylabel="Images", title="Fit / validation class counts")
 plt.show()
-display(pd.DataFrame({"label": range(len(class_names)), "species": class_names}).head(10))
 ''')
 md('''
-## 4. Inspect augmentations
+## 4. Preview cumulative training augmentation
 
-- Geometry: random crop/zoom, horizontal flip and mild rotation; no artificial
-  change to a bird's body shape, which could change species cues.
-- Color: mild ColorJitter. Strong color changes can damage fine-grained bird labels.
-- Grayscale: randomly remove color from 20% of training samples, then keep three
-  channels. This is **not infrared imaging**; RGB photographs contain no thermal data.
-- Random erasing appears only in the combined recipe, so its isolated contribution
-  cannot be inferred from this experiment matrix.
-
-Only training images receive augmentation; validation and deployment are deterministic.
+Geometry uses mild crop/zoom, flip and rotation, not arbitrary body distortion.
+ColorJitter is mild because feather colors identify species. Stage 7 adds random
+erasing; stage 8 additionally tests grayscale (20% probability).
+Grayscale is NOT infrared or thermal imaging. It may reduce accuracy.
+Validation, Test and Streamlit use deterministic preprocessing without augmentation.
 ''')
 code('''
-from birdlab import MEAN, STD
 seed_everything(cfg.seed)
-with Image.open(fit_df.iloc[0].path) as source:
-    source = source.convert("RGB")
+mean, std = normalization(ARCHITECTURES[0])
+with Image.open(fit_df.iloc[0].path) as image:
+    source = image.convert("RGB")
 fig, axes = plt.subplots(1, 5, figsize=(16, 4))
-for ax, experiment in zip(axes, [plan[0], plan[1], plan[2], plan[3], plan[-1]]):
-    image = make_transform(experiment, cfg.image_size)(source)
-    image = image * torch.tensor(STD)[:, None, None] + torch.tensor(MEAN)[:, None, None]
-    ax.imshow(image.clamp(0, 1).permute(1, 2, 0))
-    ax.set_title(experiment.name)
+for ax, index in zip(axes, [0, 2, 3, 7, 8]):
+    tensor = make_transform(plan[index], cfg.image_size, mean, std)(source)
+    tensor = tensor * torch.tensor(std)[:, None, None] + torch.tensor(mean)[:, None, None]
+    ax.imshow(tensor.clamp(0, 1).permute(1, 2, 0))
+    ax.set_title(plan[index].name)
     ax.axis("off")
 plt.tight_layout()
 plt.show()
 ''')
-md('''
-## 5. MobileNetV3 baseline
 
-Baseline: ImageNet pretrained model + fresh 200-class head, deterministic resize,
-cross entropy, no dropout, no weight decay, no label smoothing, no stochastic depth.
-It is a legitimate reference; it may already perform well. Loss of training fit,
-or validation accuracy much lower than fit accuracy, must be interpreted from
-the curves rather than assumed in advance.
-
-The first run downloads official ImageNet weights into `.cache/torch`.
-Running a cell again skips completed runs or resumes the last completed epoch.
-''')
-code('''
-mobile_baseline = train_experiment(
-    ARCHITECTURES[0], plan[0], cfg, fit_df, val_df, class_names, manifest)
-display(pd.DataFrame([mobile_baseline]))
-plot_history(mobile_baseline["checkpoint"])
-''')
-md('''
-## 6. MobileNetV3 independent ablations and combined recipe
-
-Each single-factor experiment resets to the same pretrained initialization.
-It does not continue from the preceding experiment. A negative delta is valid
-evidence that the tested method/settings did not help. The combined recipe is
-predefined; it is not guaranteed to outperform all individual runs.
-''')
-code('''
-for experiment in plan[1:]:
-    train_experiment(ARCHITECTURES[0], experiment, cfg, fit_df, val_df, class_names, manifest)
-display(results_table(cfg.output_dir))
+descriptions = [
+    ("Baseline: frozen backbone", "Only train the 200-class linear head. No random augmentation, dropout, weight decay or label smoothing. Both models use the same training budget; do not stop at a selected accuracy range."),
+    ("Add backbone fine-tuning", "Keep the baseline preprocessing/loss. After 2 head-only warm-up epochs, unfreeze the backbone with a smaller learning rate. Compare with the frozen baseline for BOTH models."),
+    ("Add geometry augmentation", "Keep fine-tuning; add random resized crop, horizontal flip and mild rotation."),
+    ("Add color augmentation", "Keep fine-tuning + geometry; add mild ColorJitter."),
+    ("Add dropout", "Keep all previous methods; add classifier dropout=0.3."),
+    ("Add weight decay", "Keep all previous methods; add AdamW weight_decay=0.001."),
+    ("Add label smoothing", "Keep all previous methods; add label_smoothing=0.1."),
+    ("Add random erasing", "Keep all previous methods; add random erasing with probability 0.15."),
+    ("Add grayscale experiment", "Keep all previous methods; add grayscale with probability 0.2. This tests reduced color dependence; it is not guaranteed to help."),
+]
+for index, (title, description) in enumerate(descriptions):
+    md(f"## Stage {index}. {title}\n\n{description}\n\nRun this cell after the previous paired stage. Completed runs skip; interrupted runs resume from the last completed epoch. Both models appear before moving to the next recipe.")
+    code(f'''
+stage_results = train_stage({index}, cfg, fit_df, val_df, class_names, manifest)
+display(stage_results[["architecture", "experiment", "val_top1", "val_average_per_class",
+                       "delta_vs_previous_pp", "delta_vs_baseline_pp", "gap", "best_epoch"]].style.format({{
+    "val_top1": "{{:.2%}}", "val_average_per_class": "{{:.2%}}", "gap": "{{:.2%}}",
+    "delta_vs_previous_pp": "{{:+.2f}}", "delta_vs_baseline_pp": "{{:+.2f}}",
+}}))
 plot_results(cfg.output_dir)
 ''')
+    if index == 0:
+        code('''
+for checkpoint in stage_results.checkpoint:
+    plot_history(checkpoint)
+''')
+
 md('''
-## 7. EfficientNetV2-S baseline
+## 5. Compare all paired stages (validation only)
 
-Use the same split, resolution, epoch budget, seed and optimization policy.
-EfficientNetV2-S has more parameters, so training may be slower. The original
-EfficientNetV2-M / ConvNeXt experiments are intentionally not carried over.
-''')
-code('''
-efficient_baseline = train_experiment(
-    ARCHITECTURES[1], plan[0], cfg, fit_df, val_df, class_names, manifest)
-display(pd.DataFrame([efficient_baseline]))
-plot_history(efficient_baseline["checkpoint"])
-''')
-md('''
-## 8. EfficientNetV2-S independent ablations and combined recipe
-''')
-code('''
-for experiment in plan[1:]:
-    train_experiment(ARCHITECTURES[1], experiment, cfg, fit_df, val_df, class_names, manifest)
-display(results_table(cfg.output_dir))
-plot_results(cfg.output_dir)
-''')
-md('''
-## 9. Compare accuracy changes and diagnose overfitting (validation only)
+Top-1 = correct images / all images. Average accuracy per class = mean recall
+across the 200 true species. It is not one-vs-rest binary accuracy.
 
-Top-1 = correctly classified images / all images.
-Average accuracy per class = mean of the 200 class recalls, each defined as
-correct predictions for class c / images whose true label is c.
-It is **not** one-vs-rest binary accuracy.
+`delta_vs_previous_pp` measures the newly added method in the context of all
+earlier methods. `delta_vs_baseline_pp` measures total change since stage 0.
+A change from 30% to 40% is +10 percentage points. Declines remain visible.
+This cumulative experiment does not measure each method in isolation or prove
+statistical significance from one seed. The best recipe may be an EARLIER stage.
 
-`delta_vs_baseline_pp` uses percentage points: 0.70 -> 0.75 is +5 pp, not +5%.
-Fit accuracy and cross entropy are also measured in eval mode on unaugmented
-training images, so dropout and augmentation do not make the gap misleading.
-The loss plotted for every run is unsmoothed cross entropy, even when the
-optimized objective includes label smoothing.
-
-Report one-seed results as one-seed results, not proof of statistical significance.
-No method is guaranteed to increase accuracy. Extra seeds can be run in separate
-output directories before opening Test, if time permits.
+Fit-eval curves use unaugmented inputs with dropout off; compare these with
+validation to diagnose overfitting. Loss curves use unsmoothed cross entropy
+even when the optimized training objective uses label smoothing.
 ''')
 code('''
 comparison = results_table(cfg.output_dir)
-display(comparison[["architecture", "experiment", "val_top1", "val_average_per_class",
-                    "delta_vs_baseline_pp", "fit_top1", "gap", "best_epoch", "training_seconds"]])
-plot_results(cfg.output_dir)
+display(paired_comparison(cfg.output_dir))
 for architecture in ARCHITECTURES:
     winner = comparison[comparison.architecture == architecture].sort_values(
         ["val_top1", "experiment"], ascending=[False, True]).iloc[0]
@@ -234,18 +201,15 @@ for architecture in ARCHITECTURES:
     plot_history(winner.checkpoint)
 ''')
 md('''
-## 10. Final evaluation on the official Test set
+## 6. Final Test evaluation - only after all paired stages
 
-**Run only after all experiments and validation decisions are complete.**
-This cell locks selection, then evaluates the baseline and validation winner for
-each architecture (up to four checkpoints). The deployment model is the global
-validation winner, regardless of test ranking. Do not tune further using Test.
+Lock the baseline and validation winner for each architecture before opening
+Test. The deployment model is the global validation winner, regardless of test
+ranking. No further training/tuning against the viewed Test results.
 
-The supplied Test set contains 4 byte-identical overlaps with Train. Report the
-official complete-set metrics **and** the supplementary clean-subset metrics.
-Test data and all original labels are retained. Reports include confusion matrix,
-per-class accuracy, predictions, and correct/incorrect examples. Re-running reads
-saved metrics; changing models after test access is blocked for this study.
+Report official complete-Test metrics and a supplementary clean subset excluding
+four byte-identical Train/Test overlaps. Outputs include both required metrics,
+per-class CSVs, confusion matrices and correct/incorrect prediction examples.
 ''')
 code('''
 test_summary = final_evaluation(cfg, class_names, manifest)
@@ -253,44 +217,35 @@ display(test_summary)
 print("Exported deployment/bird_model.pth and deployment/model_info.json")
 ''')
 md('''
-## 11. Test the exported checkpoint locally
-
-The displayed scores come from real trained weights. Model loading uses the
-saved label mapping and the same input preprocessing, with no ImageNet download.
+## 7. Test the exported model
 ''')
 code('''
 predictor, checkpoint = load_predictor("deployment/bird_model.pth", "cpu")
-# Replace with your own bird photograph to demonstrate generalisation.
-example = ROOT / "Test" / "0000.jpg"
-with Image.open(example) as image:
+with Image.open(ROOT / "Test/0000.jpg") as image:
     display(image.resize((320, 320)))
     display(predict_image(predictor, checkpoint, image))
 del predictor
 ''')
 md('''
-## 12. Streamlit and submission
+## 8. Streamlit and submission
 
-In a terminal run:
+After training, run in a terminal:
 ```
 .venv\\Scripts\\python.exe -m streamlit run app.py
 ```
-Upload photos, inspect Top-5 scores, and compare the experiment results.
+Demonstrate image upload, Top-5 predictions, model selection and stage-by-stage
+comparison charts. The teacher has approved Streamlit for the web application.
 
-The teacher has approved Streamlit instead of the original Hugging Face
-requirement. Run the local app with the command above and open the URL printed
-in the terminal. The actual `deployment/bird_model.pth` is exported after training.
-
-Submission checklist:
-1. PDF report, at most 4 pages, with your name and ID; Methodology and Result and
-   Discussion; both required test metrics, architecture/loss/hyperparameters,
-   evidence of overfitting, ablation effects, error analysis and justified winner.
-2. Source code ZIP, generated with `.venv\\Scripts\\python.exe tools/package_source.py`.
-3. At most 10-minute video: concepts, model design, code, training/results and
-   Streamlit web application demonstration. Include the YouTube link and
-   Streamlit run instructions in the report; add an app URL if deployed online.
-
-Write the discussion after actual runs. Do not fill missing accuracy values with
-assumed numbers. See `PROGRESS.md` for the current implementation status.
+Submit a <=4-page PDF with name/ID, Methodology and Result and Discussion,
+real experimental evidence and both required test metrics. Record a <=10-minute
+video explaining models/code/results and demonstrating Streamlit; include the
+YouTube link and Streamlit run instructions in the report.
+Generate the source ZIP after training:
+```
+.venv\\Scripts\\python.exe tools/package_source.py
+```
+The ZIP excludes weights, image folders and environments. Do not use smoke-test
+scores as assignment results. No final accuracy is claimed before full training.
 ''')
 
 notebook = nbf.v4.new_notebook(cells=cells, metadata={
@@ -299,4 +254,4 @@ notebook = nbf.v4.new_notebook(cells=cells, metadata={
 })
 nbf.validate(notebook)
 nbf.write(notebook, ROOT / "Bird_Classification_Local_GPU.ipynb")
-print(f"Created notebook with {len(cells)} clean cells")
+print(f"Created {len(cells)} cells: 9 paired cumulative stages, MobileNetV1 / EfficientNetV2-S")

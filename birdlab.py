@@ -1,6 +1,6 @@
 """Reproducible CUB-200 experiments shared by the notebook and Streamlit.
 
-Only two architectures are supported. Each ablation starts independently from
+Only two architectures are trained. Cumulative recipes start independently from
 the same ImageNet weights and classifier seed; test data never selects weights.
 """
 from __future__ import annotations
@@ -28,7 +28,8 @@ from torchvision import models, transforms as T
 from torchvision.ops import StochasticDepth
 from tqdm.auto import tqdm
 
-ARCHITECTURES = ("mobilenet_v3_large", "efficientnet_v2_s")
+ARCHITECTURES = ("mobilenet_v1", "efficientnet_v2_s")
+MOBILENET_V1_SOURCE = "mobilenetv1_100.ra4_e3600_r224_in1k"
 MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 
@@ -72,11 +73,13 @@ class Config:
     head_lr: float = 3e-4
     require_gpu: bool = True
     pretrained: bool = True
+    amp_init_scale: float = 128.0
 
 
 @dataclass(frozen=True)
 class Experiment:
     name: str
+    fine_tune: bool = False
     geometry: bool = False
     color: bool = False
     grayscale: bool = False
@@ -87,19 +90,21 @@ class Experiment:
 
 
 def experiment_plan():
-    # Single-factor experiments are each compared with 00_baseline, not with
-    # the preceding row. The final recipe tests the combination, not causality.
-    return [
-        Experiment("00_baseline"),
-        Experiment("01_geometry", geometry=True),
-        Experiment("02_color", color=True),
-        Experiment("03_grayscale", grayscale=True),
-        Experiment("04_dropout", dropout=0.3),
-        Experiment("05_weight_decay", weight_decay=1e-3),
-        Experiment("06_label_smoothing", label_smoothing=0.1),
-        Experiment("07_combined", geometry=True, color=True, dropout=0.3,
-                   weight_decay=1e-3, label_smoothing=0.1, erasing=True),
-    ]
+    # Each row adds ONE setting to the previous recipe, keeping prior settings.
+    # Reset weights for every recipe to avoid confounding with extra training.
+    plan = [Experiment("00_baseline")]
+    for name, change in [
+        ("01_fine_tune", {"fine_tune": True}),
+        ("02_geometry", {"geometry": True}),
+        ("03_color", {"color": True}),
+        ("04_dropout", {"dropout": 0.3}),
+        ("05_weight_decay", {"weight_decay": 1e-3}),
+        ("06_label_smoothing", {"label_smoothing": 0.1}),
+        ("07_erasing", {"erasing": True}),
+        ("08_grayscale", {"grayscale": True}),
+    ]:
+        plan.append(replace(plan[-1], name=name, **change))
+    return plan
 
 
 def read_annotations(root, split):
@@ -177,7 +182,12 @@ def prepare_data(cfg):
     return fit, val, names, manifest
 
 
-def make_transform(exp=None, size=224):
+def normalization(architecture):
+    # Preserve the normalization expected by each ImageNet checkpoint.
+    return ((0.5,) * 3, (0.5,) * 3) if architecture == "mobilenet_v1" else (MEAN, STD)
+
+
+def make_transform(exp=None, size=224, mean=MEAN, std=STD):
     # Evaluation and deployment use exactly the same deterministic transform.
     steps = []
     if exp and exp.geometry:
@@ -190,7 +200,7 @@ def make_transform(exp=None, size=224):
                                saturation=0.15, hue=0.02)]
     if exp and exp.grayscale:
         steps += [T.RandomGrayscale(p=0.2)]
-    steps += [T.ToTensor(), T.Normalize(MEAN, STD)]
+    steps += [T.ToTensor(), T.Normalize(mean, std)]
     if exp and exp.erasing:
         steps += [T.RandomErasing(p=0.15, scale=(0.02, 0.1), value=0)]
     return T.Compose(steps)
@@ -212,19 +222,48 @@ class BirdDataset(Dataset):
         return tensor, int(row.label)
 
 
-def make_loader(frame, cfg, exp=None, shuffle=False, generator=None):
+def make_loader(frame, cfg, exp=None, shuffle=False, generator=None, architecture=None):
+    mean, std = normalization(architecture)
     return DataLoader(
-        BirdDataset(frame, make_transform(exp, cfg.image_size)),
+        BirdDataset(frame, make_transform(exp, cfg.image_size, mean, std)),
         batch_size=cfg.batch_size, shuffle=shuffle, drop_last=False,
         num_workers=cfg.num_workers, pin_memory=torch.cuda.is_available(),
         generator=generator,
     )
 
 
+class MobileNetV1(nn.Module):
+    """Width 1.0 MobileNetV1: stem, 13 depthwise/pointwise blocks, GAP, FC.
+
+    timm supplies the V1 layers/weights; this adapter exposes features/classifier
+    for the shared training loop; the V1 feature stack has no inverted residuals.
+    """
+    def __init__(self, dropout=0.0, pretrained=True):
+        super().__init__()
+        import timm
+        backbone = timm.create_model(MOBILENET_V1_SOURCE, pretrained=False)
+        if pretrained:
+            cache = Path(torch.hub.get_dir()) / "checkpoints/mobilenetv1_100_imagenet.pth"
+            if cache.exists():
+                backbone.load_state_dict(torch.load(cache, map_location="cpu", weights_only=True))
+            else:
+                # Public weight download only; Streamlit is the deployment app.
+                backbone = timm.create_model(MOBILENET_V1_SOURCE, pretrained=True)
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                save_checkpoint(cache, backbone.state_dict())
+        self.features = nn.Sequential(backbone.conv_stem, backbone.bn1,
+                                      backbone.blocks, backbone.conv_head, backbone.bn2)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.classifier = nn.Sequential(nn.Dropout(dropout), backbone.classifier)
+
+    def forward(self, images):
+        features = self.pool(self.features(images)).flatten(1)
+        return self.classifier(features)
+
+
 def build_model(architecture, num_classes, dropout=0.0, pretrained=True):
-    if architecture == "mobilenet_v3_large":
-        weights = models.MobileNet_V3_Large_Weights.IMAGENET1K_V2 if pretrained else None
-        model = models.mobilenet_v3_large(weights=weights, dropout=dropout)
+    if architecture == "mobilenet_v1":
+        model = MobileNetV1(dropout, pretrained)
     elif architecture == "efficientnet_v2_s":
         weights = models.EfficientNet_V2_S_Weights.IMAGENET1K_V1 if pretrained else None
         model = models.efficientnet_v2_s(weights=weights, dropout=dropout,
@@ -342,8 +381,8 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
     device = device_for(cfg)
     seed_everything(cfg.seed)
     generator = torch.Generator().manual_seed(cfg.seed)
-    train_loader = make_loader(fit, cfg, exp, True, generator)
-    val_loader = make_loader(val, cfg)
+    train_loader = make_loader(fit, cfg, exp, True, generator, architecture)
+    val_loader = make_loader(val, cfg, architecture=architecture)
     model = build_model(architecture, len(names), exp.dropout, cfg.pretrained).to(device)
     optimizer = torch.optim.AdamW([
         {"params": model.features.parameters(), "lr": cfg.backbone_lr},
@@ -351,7 +390,10 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
     ], weight_decay=exp.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=cfg.epochs - cfg.head_epochs)
-    scaler = torch.amp.GradScaler(device.type, enabled=device.type == "cuda")
+    # Conservative starting scale avoids overflow on the first unfrozen V1
+    # batches; GradScaler still grows/backs off dynamically for both models.
+    scaler = torch.amp.GradScaler(device.type, init_scale=cfg.amp_init_scale,
+                                  enabled=device.type == "cuda")
     history, best, stale, start, elapsed = [], -1.0, 0, 0, 0.0
     last_path = folder / "last.pth"
     if last_path.exists():
@@ -376,7 +418,7 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
             if stale >= cfg.patience:
                 break
             tick = time.perf_counter()
-            head_only = epoch < cfg.head_epochs
+            head_only = not exp.fine_tune or epoch < cfg.head_epochs
             configure_trainable(model, head_only)
             train_metrics, _, _ = run_epoch(
                 model, train_loader, device, optimizer, scaler, exp.label_smoothing,
@@ -384,9 +426,9 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
             )
             # Measure train/validation on identical deterministic, unaugmented
             # inputs with dropout off: a meaningful generalisation-gap estimate.
-            fit_metrics, _, _ = run_epoch(model, make_loader(fit, cfg), device)
+            fit_metrics, _, _ = run_epoch(model, make_loader(fit, cfg, architecture=architecture), device)
             val_metrics, _, _ = run_epoch(model, val_loader, device)
-            if not head_only:
+            if epoch >= cfg.head_epochs:
                 scheduler.step()
             elapsed += time.perf_counter() - tick
             row = {"epoch": epoch + 1, "phase": "head" if head_only else "fine_tune",
@@ -404,10 +446,11 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
                     "model": {k: v.detach().cpu() for k, v in model.state_dict().items()},
                     "architecture": architecture, "experiment": asdict(exp),
                     "class_names": names, "image_size": cfg.image_size,
-                    "mean": list(MEAN), "std": list(STD), "epoch": epoch + 1,
+                    "mean": list(normalization(architecture)[0]),
+                    "std": list(normalization(architecture)[1]), "epoch": epoch + 1,
                     "val_metrics": val_metrics, "train_fingerprint": manifest["train_sha256"],
                 })
-            elif not head_only:
+            elif epoch >= cfg.head_epochs:
                 stale += 1
             pd.DataFrame(history).to_csv(folder / "history.csv", index=False)
             numpy_state = np.random.get_state()
@@ -432,6 +475,7 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
                   "val_average_per_class": checkpoint["val_metrics"]["average_per_class"],
                   "fit_top1": chosen["fit_eval_top1"], "gap": chosen["gap"],
                   "training_seconds": elapsed, "pretrained": cfg.pretrained,
+                  "fine_tune": exp.fine_tune, "protocol": "cumulative_recipes_fresh_initialization",
                   "checkpoint": str(folder / "best.pth")}
         write_json(folder / "result.json", result)
         return result
@@ -443,7 +487,9 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
 
 
 def results_table(output_dir):
-    results = [read_json(p) for p in sorted(Path(output_dir).glob("*/*/result.json"))]
+    stage_names = [exp.name for exp in experiment_plan()]
+    results = [read_json(p) for p in sorted(Path(output_dir).glob("*/*/result.json"))
+               if p.parent.parent.name in ARCHITECTURES and p.parent.name in stage_names]
     if not results:
         return pd.DataFrame()
     frame = pd.DataFrame(results)
@@ -451,8 +497,43 @@ def results_table(output_dir):
     frame["delta_vs_baseline_pp"] = [
         100 * (row.val_top1 - baseline.get(row.architecture, np.nan))
         for row in frame.itertuples()]
+    by_run = frame.set_index(["architecture", "experiment"]).val_top1
+    frame["delta_vs_previous_pp"] = [
+        0.0 if stage_names.index(row.experiment) == 0 else
+        100 * (row.val_top1 - by_run.get(
+            (row.architecture, stage_names[stage_names.index(row.experiment) - 1]), np.nan))
+        for row in frame.itertuples()]
+    frame = frame.sort_values(["experiment", "architecture"]).reset_index(drop=True)
     frame.to_csv(Path(output_dir) / "comparison.csv", index=False)
     return frame
+
+
+def paired_comparison(output_dir):
+    frame = results_table(output_dir)
+    if frame.empty:
+        return frame
+    paired = frame.pivot(index="experiment", columns="architecture", values=[
+        "val_top1", "val_average_per_class", "delta_vs_previous_pp", "delta_vs_baseline_pp"])
+    paired.columns = [f"{architecture}__{metric}" for metric, architecture in paired.columns]
+    paired.to_csv(Path(output_dir) / "paired_comparison.csv")
+    return paired
+
+
+def train_stage(stage_index, cfg, fit, val, names, manifest):
+    """Run the SAME cumulative recipe for both architectures, then compare."""
+    plan = experiment_plan()
+    if not 0 <= stage_index < len(plan):
+        raise ValueError("Invalid stage index")
+    if stage_index:
+        previous = plan[stage_index - 1].name
+        for architecture in ARCHITECTURES:
+            if not (Path(cfg.output_dir) / architecture / previous / "result.json").exists():
+                raise RuntimeError(f"Complete the previous paired stage first: {previous}")
+    for architecture in ARCHITECTURES:
+        train_experiment(architecture, plan[stage_index], cfg, fit, val, names, manifest)
+    paired_comparison(cfg.output_dir)
+    frame = results_table(cfg.output_dir)
+    return frame[frame.experiment == plan[stage_index].name]
 
 
 def plot_results(output_dir):
@@ -465,13 +546,19 @@ def plot_results(output_dir):
     pivot = frame.pivot(index="experiment", columns="architecture", values="val_top1") * 100
     ax = pivot.plot.bar(figsize=(12, 5), ylabel="Validation Top-1 (%)", rot=30)
     ax.figure.tight_layout()
-    ax.figure.savefig(charts / "ablation_accuracy.png", dpi=160)
+    ax.figure.savefig(charts / "stage_accuracy.png", dpi=160)
     plt.show()
     pivot = frame.pivot(index="experiment", columns="architecture", values="delta_vs_baseline_pp")
     ax = pivot.plot.bar(figsize=(12, 5), ylabel="Change vs baseline (percentage points)", rot=30)
     ax.axhline(0, color="black", linewidth=0.8)
     ax.figure.tight_layout()
-    ax.figure.savefig(charts / "ablation_delta.png", dpi=160)
+    ax.figure.savefig(charts / "stage_delta_vs_baseline.png", dpi=160)
+    plt.show()
+    pivot = frame.pivot(index="experiment", columns="architecture", values="delta_vs_previous_pp")
+    ax = pivot.plot.bar(figsize=(12, 5), ylabel="Change vs previous recipe (pp)", rot=30)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.figure.tight_layout()
+    ax.figure.savefig(charts / "stage_delta_vs_previous.png", dpi=160)
     plt.show()
 
 
@@ -505,7 +592,8 @@ def load_predictor(checkpoint_path, device="cpu"):
 @torch.inference_mode()
 def predict_image(model, checkpoint, image, device="cpu", top_k=5):
     image = ImageOps.exif_transpose(image).convert("RGB")
-    tensor = make_transform(size=checkpoint["image_size"])(image).unsqueeze(0).to(device)
+    tensor = make_transform(size=checkpoint["image_size"], mean=checkpoint["mean"],
+                            std=checkpoint["std"])(image).unsqueeze(0).to(device)
     probs = model(tensor).softmax(1)[0].cpu()
     values, indices = probs.topk(min(top_k, len(probs)))
     return pd.DataFrame({"species": [checkpoint["class_names"][i] for i in indices.tolist()],
@@ -523,7 +611,7 @@ def final_evaluation(cfg, names, manifest):
     expected = {(arch, exp.name) for arch in ARCHITECTURES for exp in experiment_plan()}
     actual = set(zip(frame.architecture, frame.experiment)) if not frame.empty else set()
     if not expected.issubset(actual):
-        raise RuntimeError("Complete all 8 experiments for BOTH architectures before opening Test.")
+        raise RuntimeError(f"Complete all {len(experiment_plan())} stages for BOTH architectures before opening Test.")
     selected = []
     for architecture in ARCHITECTURES:
         rows = frame[frame.architecture == architecture]
@@ -565,7 +653,8 @@ def final_evaluation(cfg, names, manifest):
             results.append(read_json(metric_path))
             continue
         model, checkpoint = load_predictor(out / key / "best.pth", device_for(cfg))
-        metrics, truth, predicted = run_epoch(model, make_loader(test, cfg), device_for(cfg))
+        metrics, truth, predicted = run_epoch(model, make_loader(
+            test, cfg, architecture=checkpoint["architecture"]), device_for(cfg))
         _, matrix, recall, support = metrics_from_predictions(truth, predicted, len(names))
         pd.DataFrame({"filename": test.filename, "truth": truth, "prediction": predicted,
                       "overlaps_training": overlap}).to_csv(

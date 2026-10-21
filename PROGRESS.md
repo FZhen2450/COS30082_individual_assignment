@@ -5,8 +5,12 @@
 - Read all three assignment pages and documented submission requirements.
 - Preserved the original notebook and datasets.
 - Created the local GPU notebook and shared, commented PyTorch training module.
-- Limited architectures to MobileNetV3-Large and EfficientNetV2-S.
-- Added eight independent variants per architecture and validation delta charts.
+- Limited architectures to MobileNetV1 (width 1.0) and EfficientNetV2-S.
+- Added nine cumulative recipes, each paired across BOTH architectures before
+  advancing: frozen baseline, fine-tuning, geometry, color, dropout, weight decay,
+  label smoothing, erasing and grayscale. Total: 18 runs.
+- Added changes from the previous recipe and baseline, plus paired CSV/charts.
+- Baseline accuracy of 20-40% is an expectation only; no score is forced.
 - Added fixed grouped/stratified split, content fingerprints and duplicate reporting.
 - Added AMP, gradient accumulation, early stopping, epoch checkpoints and resume.
 - Added both required metrics, final-test selection lock, per-class analysis,
@@ -25,11 +29,19 @@ Verified locally on 2026-10-21:
 - Installed project-local PyTorch 2.7.1+cu118 / torchvision 0.22.1+cu118;
   CUDA detects the NVIDIA GeForce RTX 3050 Laptop GPU (4 GB).
 - Confirmed GPU calculations and actual AMP training/backprop for both architectures.
-- Downloaded both official ImageNet pretrained weight files into the local cache.
+- Verified the frozen baseline leaves backbone weights unchanged; fine-tuning
+  and the final cumulative recipe update backbone weights for both architectures.
+- Verified MobileNetV1 has 13 depthwise layers and 3,411,976 parameters with its
+  200-class head. Cached local weights allow offline loading.
+- Set a common conservative AMP initial scale (128) for stable first unfrozen
+  batches; the saved run configuration records this numerical setting.
+- Cached the ImageNet pretrained weights for MobileNetV1 and EfficientNetV2-S.
 - Interrupted each tiny training run after an epoch checkpoint, resumed it, and
   verified completion of the next epoch with saved optimizer/scaler/RNG state.
 - Loaded each saved model for CPU inference and checked its Top-5 predictions.
-- Validated all 24 notebook cells and Python syntax; notebook outputs start clean.
+- Validated all 35 notebook cells with a dedicated cell for each paired stage.
+- Checked one-setting-at-a-time recipe accumulation, previous-stage ordering,
+  paired CSV output and changes from the immediately previous recipe.
 - Verified the 3,863 / 966 split retains all 200 classes with no identical content
   across fit/validation; recorded six duplicate training rows.
 - Streamlit AppTest: no exceptions in the untrained/empty state.
@@ -46,13 +58,14 @@ Source changes are kept on `codex/local-gpu-training`, based on the supplied
 repository's `main` history. Images, environments, cached ImageNet weights,
 smoke-test outputs and trained checkpoints are excluded from source control.
 
-Smoke tests use only eight fit/four validation images, stored in `smoke_artifacts`,
+Smoke tests use only 17 fit/9 validation images, stored in `smoke_artifacts`,
 not `artifacts`. They are pipeline checks, not assignment accuracy results. Their
 scores must not be used in the report or deployed as a completed classifier.
 
 ## Remaining work for the assignment
 
-- Run the full baseline and ablation matrix in the new notebook.
+- Restart the notebook kernel to load the revised architecture and training plan.
+- Run all nine paired cumulative stages in the overwritten notebook.
 - Review actual learning curves and validation comparisons.
 - Run final evaluation and export the real trained deployment checkpoint.
 - Run the trained Streamlit application and demonstrate uploads, predictions and

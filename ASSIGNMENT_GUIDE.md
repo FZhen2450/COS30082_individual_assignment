@@ -24,27 +24,34 @@ PDF 本身没有规定必须先训练出很差的模型。你的老师补充的 
 
 ## 本次采用的两个架构
 
-- **MobileNetV3-Large**：作为较轻量的第一个模型，适合这台电脑的 4GB 显存。
+- **MobileNetV1（width multiplier=1.0）**：使用 depthwise + pointwise 卷积、global average pooling 和 200 类线性分类头，作为结构简单的第一个模型。
 - **EfficientNetV2-S**：作为第二个模型；不用原 notebook 中的 V2-M 和 ConvNeXt。
 
-“最多两个 model”在这里按**最多两个架构**理解。同一架构的多个实验需要分别重新训练，才能比较单一方法的效果；目前是 8 个实验 × 2 个架构，共 16 次训练。如果老师指的是最多两次训练总数，就需要先确认，因为这样无法完成独立的消融实验。
+“最多两个 model”在这里按**最多两个架构**理解。目前是 9 个累加方案 × 2 个架构，共 18 次训练。每一个阶段先完成两个模型并展示对比，再进入下一阶段。
+
+第一次训练使用合理的简单 baseline：冻结 ImageNet 预训练骨干，只训练新的 200 类分类头。你希望看到的 **20–40% 是预期范围，不是保证值**；不能在达到某个低准确率时故意停止、错误预处理或修改数据来凑结果。两个模型的真实 baseline 也不一定相同。
 
 ## 怎样比较各种方法
 
-| 实验 | 相对 baseline 的变化 | 要分析的问题 |
+| 阶段 | 在上一步基础上新增的设置 | 两个模型都要比较的问题 |
 |---|---|---|
-| 00 baseline | 无随机增强、无 dropout / weight decay / label smoothing | 初始性能如何，是否存在过拟合？ |
-| 01 geometry | 随机裁剪、水平翻转、小角度旋转 | 对位置、角度、缩放的鲁棒性是否改善？ |
-| 02 color | 温和的亮度、对比度、饱和度和色调变化 | 是否减少对光照的依赖？会否破坏鸟类颜色线索？ |
-| 03 grayscale | 20% 概率灰度化并保持三通道 | 减少颜色依赖是否有效？ |
-| 04 dropout | dropout=0.3 | 泛化是否改善，训练与验证差距是否缩小？ |
-| 05 weight decay | AdamW weight_decay=0.001 | 权重正则化是否有效？ |
-| 06 label smoothing | smoothing=0.1 | 降低过度自信是否改善验证准确率？ |
-| 07 combined | geometry + color + dropout + weight decay + smoothing + erasing | 组合方案是否有效？它可能不如单项实验。 |
+| 00 baseline | 冻结骨干，只训练分类头；无随机增强和额外正则化 | 初始 validation accuracy 如何？ |
+| 01 fine tune | 解冻骨干，先 warm-up 分类头再微调 | 相对冻结骨干改善多少？ |
+| 02 geometry | 保留微调，再加随机裁剪、翻转、小角度旋转 | 几何增强带来多少变化？ |
+| 03 color | 保留前面设置，再加温和 ColorJitter | 光照鲁棒性是否改善？ |
+| 04 dropout | 保留前面设置，再加 dropout=0.3 | 泛化差距是否缩小？ |
+| 05 weight decay | 保留前面设置，再加 weight_decay=0.001 | 权重正则化是否进一步改善？ |
+| 06 label smoothing | 保留前面设置，再加 smoothing=0.1 | 是否进一步改善准确率？ |
+| 07 erasing | 保留前面设置，再加随机擦除 | 遮挡增强是否有效？ |
+| 08 grayscale | 保留前面设置，再加 20% 概率灰度化 | 减少颜色依赖会改善还是损害细粒度分类？ |
 
-01–06 每项都独立与 00 比较，不是接着上一个实验继续训练。07 同时改变多个因素，因此不能声称其提升单独来自 random erasing。每次重置为相同 ImageNet 预训练权重和分类头种子。
+这是**方法设置的逐步累加**。每个方案都重新从同一架构的相同 ImageNet 权重与分类头种子开始，保持相同训练预算；不接着上一阶段 checkpoint 多训练一轮，避免把额外训练时间误当成方法收益。
 
-所有实验共同使用 classifier warm-up、cosine scheduler、early stopping 和固定 BatchNorm 统计；这些是公共训练设置，不作为已经隔离验证的单项提升。
+每一步都报告 MobileNetV1 与 EfficientNetV2-S 的两项 validation 指标、相对上一阶段的变化、相对 baseline 的总变化；输出 `comparison.csv` 和横向排列的 `paired_comparison.csv`。负提升也照实展示，最终最佳方案可能是较早的某一步。这是累加配置比较，不是各方法单独作用的消融实验。
+
+所有方案保持相同数据划分、随机种子、分辨率、最大 epoch 数、scheduler、early stopping 和固定 BatchNorm 统计。baseline 全程冻结骨干；01 之后前 2 个 epoch 只训练分类头，再解冻微调。
+
+MobileNetV1 使用 `timm==1.0.27` 的 `mobilenetv1_100.ra4_e3600_r224_in1k` 预训练骨干；它仍是 V1 架构。输入 mean/std 为 0.5，EfficientNetV2-S 使用其 ImageNet mean/std；训练、评估与 Streamlit 分别保持一致。首次公开权重下载后本地缓存，不需要部署账号。两套权重的预训练配方不同，结果应表述为预训练系统的比较。
 
 **random shape** 这里实现为合理的几何变化，不随意扭曲鸟的身体形状。**灰度不等于红外线**：现有 RGB 图像没有真实红外或热成像信息，所以不会把滤镜或灰度伪称为红外数据。
 
@@ -61,7 +68,7 @@ PDF 本身没有规定必须先训练出很差的模型。你的老师补充的 
 1. PowerShell 中运行 `powershell -ExecutionPolicy Bypass -File .\setup_gpu.ps1`。
 2. 打开 `Bird_Classification_Local_GPU.ipynb`，在 VS Code 右上角选择 `.venv\Scripts\python.exe` kernel。
 3. 顺序运行：GPU 检查 → 参数 → 数据划分 → 增强预览 → MobileNet baseline。
-4. 查看第一条真实 learning curve，再运行其余实验和 EfficientNetV2-S。完整实验可能需要数小时。
+4. Stage 0 同时完成两个模型的 baseline 后查看真实 learning curves，再顺序运行 Stage 1–8；每步都会展示两模型结果与累加增益图。完整实验可能需要数小时。
 5. 实验完成后看 `comparison.csv`、准确率与增益图，写出真实结论。训练曲线中 fit-eval 明显高于 validation 才是需要讨论的过拟合证据之一，不能只看 training accuracy。
 6. 最后运行 Test evaluation，导出模型；终端运行 `.venv\Scripts\python.exe -m streamlit run app.py`。
 7. 在 Streamlit 中演示上传鸟类图片、Top-5 预测和实验对比，录视频，然后写报告。本机运行即可按上述命令准备演示；训练前没有最终准确率或可提交的训练成果。
@@ -71,7 +78,7 @@ PDF 本身没有规定必须先训练出很差的模型。你的老师补充的 
 ## 建议 4 页报告结构
 
 1. **Methodology**：数据与 split、重复数据问题、两个架构、ImageNet transfer learning、输入预处理、loss 和训练参数。
-2. **Methodology / Experiments**：baseline 与单项方法表、控制变量、组合方案、checkpoint 选择原则。
+2. **Methodology / Experiments**：baseline 与逐步累加设置表、控制变量、每步两模型对比、checkpoint 选择原则。
 3. **Result and Discussion**：真实 validation 对比表与曲线、过拟合分析、两项最终 Test 指标，并附去重复后的补充指标。
 4. **Result and Discussion**：错误样本、颜色或形状相近类别的混淆、模型选择理由、4GB/224px/单随机种子的限制；YouTube 链接与 Streamlit 演示/运行说明（若已线上部署，可附链接）。
 
@@ -94,13 +101,13 @@ PDF 本身没有规定必须先训练出很差的模型。你的老师补充的 
 
 在 4 页限制内，建议优先放以下内容，而不是把所有输出截图塞进报告：
 
-1. **一个精简实验表**：两个架构的 baseline 与各方法的 validation Top-1、Average accuracy per class、相对 baseline 的变化（pp）。明确哪些方法没有提升，单种子结果不当作统计显著结论。
+1. **一个精简实验表**：逐步累加阶段中两个架构的 validation Top-1、Average accuracy per class、相对上一步与 baseline 的变化（pp）。明确哪些步骤没有提升，单种子结果不当作统计显著结论。
 2. **两组关键 learning curves**：各架构 baseline 与 validation 最佳方案的 fit-eval / validation 曲线；结合准确率差距和 loss 讨论过拟合，而不是只写“使用了 dropout”。
 3. **一个最终测试表**：两个架构的 baseline 与 validation 最佳方案，报告两项必需指标；模型选择不能依据这个测试表重新调整。
 4. **少量正确与错误样本**：说明哪些鸟类容易混淆，以及颜色、姿态、背景或裁剪可能造成的影响。观察到的现象与未经验证的原因要分开描述。
 5. **数据质量发现**：披露重复图与冲突标签、说明如何避免 fit/validation 泄漏，并比较完整 Test 与去重复子集指标。这个发现有助于支撑分析深度，但不能保证额外得分。
 
-具体可分析的问题包括：颜色增强有没有破坏细粒度的羽毛颜色线索？灰度增强是否降低表现？组合方案是否反而不如某个单项方案？较大的模型是否值得额外训练时间？这些都要等真实结果出来再回答。
+具体可分析的问题包括：加入颜色增强有没有破坏细粒度的羽毛颜色线索？最后加入灰度是否降低表现？累加更多设置是否反而不如较早阶段？较大的模型是否值得额外训练时间？这些都要等真实结果出来再回答；不能把累加方案中的变化解释为方法在所有场景下的独立效果。
 
 完整的 200×200 confusion matrix 放在结果文件里；报告优先选择少数典型混淆类别或错误图片，保证图中文字可读。两个模型的结构说明应涉及实际采用的模块、200 类分类头、冻结/解冻策略和 loss，不能只列模型名称。
 

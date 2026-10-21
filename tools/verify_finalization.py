@@ -34,7 +34,7 @@ def main():
             for i, experiment in enumerate(b.experiment_plan()):
                 folder = out / architecture / experiment.name
                 folder.mkdir(parents=True)
-                if i in [0, 7]:
+                if i in [0, len(b.experiment_plan()) - 1]:
                     shutil.copy2(ROOT / "smoke_artifacts" / architecture / "00_baseline/best.pth",
                                  folder / "best.pth")
                 # Synthetic scores select known paths; not benchmark results.
