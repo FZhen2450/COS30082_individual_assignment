@@ -15,6 +15,8 @@
 - Added local setup, source packaging and Streamlit demonstration instructions.
 - Updated the submission workflow following the teacher's approval to use
   Streamlit instead of Hugging Face; removed platform-specific deployment files.
+- Mapped the supplied 20-point rubric to report evidence, modeling validation,
+  Streamlit demonstrations and a timed video outline in ASSIGNMENT_GUIDE.md.
 
 ## Validation status
 
@@ -56,7 +58,8 @@ scores must not be used in the report or deployed as a completed classifier.
 - Run the trained Streamlit application and demonstrate uploads, predictions and
   experiment comparisons in the video.
 - Write the <=4-page report with actual results, name and student ID.
-- Record the <=10-minute video and add both links to the report.
+- Record the <=10-minute video and add its YouTube link and Streamlit run
+  instructions to the report (plus an app URL if deployed online).
 - Rebuild the source ZIP after training to include the final results.
 
 No full training accuracy or final trained model is claimed at the implementation
