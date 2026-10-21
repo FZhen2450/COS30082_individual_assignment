@@ -25,12 +25,21 @@ from sklearn.model_selection import train_test_split
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms as T
+from torchvision.transforms import functional as TF
 from torchvision.ops import StochasticDepth
 from tqdm.auto import tqdm
 
 ARCHITECTURES = ("mobilenet_v1", "efficientnet_v2_s")
 MOBILENET_V1_SOURCE = "mobilenetv1_100.ra4_e3600_r224_in1k"
-PIPELINE_VERSION = "paired_methods_resize_crop_v2"
+PIPELINE_VERSION = "retrain_v3_stronger_augmentation_tables"
+DEFAULT_OUTPUT_DIR = "artifacts_retrain_v3"
+CROP_SCALE = (0.4, 1.0)
+CROP_RATIO = (0.75, 1.3333333333333333)
+ROTATION_RANGE = (-45.0, 45.0)
+COLOR_JITTER = {"brightness": 0.4, "contrast": 0.4, "saturation": 0.5, "hue": 0.1}
+COLOR_EFFECT_NAMES = ("invert", "red", "green", "blue", "yellow")
+COLOR_EFFECT_WEIGHTS = (0.1, 0.25, 0.25, 0.25, 0.15)
+COLOR_EFFECT_P = 0.25
 MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 
@@ -60,7 +69,7 @@ def seed_everything(seed):
 @dataclass(frozen=True)
 class Config:
     data_root: str = "."
-    output_dir: str = "artifacts"
+    output_dir: str = DEFAULT_OUTPUT_DIR
     seed: int = 42
     val_fraction: float = 0.2
     image_size: int = 224
@@ -83,8 +92,10 @@ class Experiment:
     fine_tune: bool = False
     crop: bool = False
     flip: bool = False
+    vertical_flip: bool = False
     rotation: bool = False
     color: bool = False
+    color_effects: bool = False
     grayscale: bool = False
     dropout: float = 0.0
     weight_decay: float = 0.0
@@ -100,16 +111,50 @@ def experiment_plan():
         ("01_fine_tune", {"fine_tune": True}),
         ("02_random_crop", {"crop": True}),
         ("03_horizontal_flip", {"flip": True}),
-        ("04_rotation", {"rotation": True}),
-        ("05_color", {"color": True}),
-        ("06_dropout", {"dropout": 0.3}),
-        ("07_weight_decay", {"weight_decay": 1e-3}),
-        ("08_label_smoothing", {"label_smoothing": 0.1}),
-        ("09_erasing", {"erasing": True}),
-        ("10_grayscale", {"grayscale": True}),
+        ("04_vertical_flip", {"vertical_flip": True}),
+        ("05_random_rotation", {"rotation": True}),
+        ("06_color_jitter", {"color": True}),
+        ("07_color_effects", {"color_effects": True}),
+        ("08_dropout", {"dropout": 0.3}),
+        ("09_weight_decay", {"weight_decay": 1e-3}),
+        ("10_label_smoothing", {"label_smoothing": 0.1}),
+        ("11_erasing", {"erasing": True}),
+        ("12_grayscale", {"grayscale": True}),
     ]:
         plan.append(replace(plan[-1], name=name, **change))
     return plan
+
+
+def stage_configuration(stage_index, cfg):
+    """Explain the added method without pretending weight updates alter pixels."""
+    plan = experiment_plan()
+    recipe = plan[stage_index]
+    changed = "baseline" if stage_index == 0 else next(
+        key for key in vars(recipe) if key != "name" and
+        getattr(recipe, key) != getattr(plan[stage_index - 1], key))
+    settings = {
+        "baseline": "ImageNet backbone frozen; train the new 200-class classifier only",
+        "fine_tune": f"Freeze backbone for {cfg.head_epochs} warm-up epochs, then unfreeze with smaller LR",
+        "crop": f"Random resized crop: area {CROP_SCALE}, ratio {CROP_RATIO}",
+        "flip": "Left/right flip, p=0.5",
+        "vertical_flip": "Up/down flip, p=0.2; an experimental orientation change",
+        "rotation": f"Angle sampled uniformly from {ROTATION_RANGE} degrees",
+        "color": f"ColorJitter: {COLOR_JITTER}",
+        "color_effects": "Experimental invert/R/G/B/yellow effects, p=0.25; tint strength 0.2-0.45",
+        "dropout": "Classifier activation dropout p=0.3; does not change image pixels",
+        "weight_decay": "AdamW weight decay=0.001; regularizes model weights",
+        "label_smoothing": "Cross-entropy smoothing=0.1; changes targets, not image pixels",
+        "erasing": "Random erasing p=0.25; area 2%-15%",
+        "grayscale": "Random grayscale p=0.2; not infrared imaging",
+    }
+    pixel_change = changed not in {"baseline", "fine_tune", "dropout", "weight_decay", "label_smoothing"}
+    return pd.DataFrame([{
+        "Model": architecture, "Stage": recipe.name, "Added method": changed,
+        "Changes pixels": pixel_change, "Setting": settings[changed],
+        "Initialization": "Original ImageNet weights; fresh classifier, not previous-stage checkpoint",
+        "Backbone policy": "Frozen throughout" if not recipe.fine_tune else
+            f"Frozen epochs 1-{cfg.head_epochs}; trainable afterwards (BN running stats fixed)",
+    } for architecture in ARCHITECTURES])
 
 
 def read_annotations(root, split):
@@ -192,25 +237,65 @@ def normalization(architecture):
     return ((0.5,) * 3, (0.5,) * 3) if architecture == "mobilenet_v1" else (MEAN, STD)
 
 
+def apply_color_effect(image, effect, strength=0.35):
+    """Experimental RGB tint/inversion; never presented as infrared imagery."""
+    if effect == "invert":
+        return TF.invert(image)
+    colors = {"red": (1, 0, 0), "green": (0, 1, 0),
+              "blue": (0, 0, 1), "yellow": (1, 1, 0)}
+    if effect not in colors:
+        raise ValueError(effect)
+    tensor = TF.to_tensor(image)
+    tint = tensor.new_tensor(colors[effect])[:, None, None]
+    return TF.to_pil_image(((1 - strength) * tensor + strength * tint).clamp(0, 1))
+
+
+class RandomColorEffect:
+    """Low-probability stress experiment, distinct from standard ColorJitter."""
+    def __init__(self, p=COLOR_EFFECT_P):
+        self.p = p
+
+    def __call__(self, image):
+        if torch.rand(()).item() >= self.p:
+            return image
+        index = int(torch.multinomial(torch.tensor(COLOR_EFFECT_WEIGHTS), 1).item())
+        strength = float(torch.empty(1).uniform_(0.2, 0.45).item())
+        return apply_color_effect(image, COLOR_EFFECT_NAMES[index], strength)
+
+
+def augmentation_settings():
+    """Save exact transform parameters so a run cannot resume after edits."""
+    return {"crop_scale": list(CROP_SCALE), "crop_ratio": list(CROP_RATIO),
+            "horizontal_flip_p": 0.5, "vertical_flip_p": 0.2,
+            "rotation_degrees": list(ROTATION_RANGE), "color_jitter": COLOR_JITTER,
+            "color_effect_p": COLOR_EFFECT_P, "color_effects": list(COLOR_EFFECT_NAMES),
+            "color_effect_weights": list(COLOR_EFFECT_WEIGHTS), "tint_strength": [0.2, 0.45],
+            "erasing_p": 0.25, "erasing_scale": [0.02, 0.15], "grayscale_p": 0.2}
+
+
 def make_transform(exp=None, size=224, mean=MEAN, std=STD):
     # Evaluation and deployment use exactly the same deterministic transform.
     # Crop AFTER the common resize: extreme aspect ratios otherwise make the
     # area/ratio constraints impossible and silently fall back to a fixed crop.
     steps = [T.Resize((size, size))]
     if exp and exp.crop:
-        steps += [T.RandomResizedCrop(size, scale=(0.75, 1.0), ratio=(0.85, 1.15))]
+        steps += [T.RandomResizedCrop(size, scale=CROP_SCALE, ratio=CROP_RATIO)]
     if exp and exp.flip:
         steps += [T.RandomHorizontalFlip()]
+    if exp and exp.vertical_flip:
+        steps += [T.RandomVerticalFlip(p=0.2)]
     if exp and exp.rotation:
-        steps += [T.RandomRotation(10)]
+        steps += [T.RandomRotation(ROTATION_RANGE, interpolation=T.InterpolationMode.BILINEAR,
+                                  fill=tuple(round(value * 255) for value in mean))]
     if exp and exp.color:
-        steps += [T.ColorJitter(brightness=0.15, contrast=0.15,
-                               saturation=0.15, hue=0.02)]
+        steps += [T.ColorJitter(**COLOR_JITTER)]
+    if exp and exp.color_effects:
+        steps += [RandomColorEffect()]
     if exp and exp.grayscale:
         steps += [T.RandomGrayscale(p=0.2)]
     steps += [T.ToTensor(), T.Normalize(mean, std)]
     if exp and exp.erasing:
-        steps += [T.RandomErasing(p=0.15, scale=(0.02, 0.1), value=0)]
+        steps += [T.RandomErasing(p=0.25, scale=(0.02, 0.15), value=0)]
     return T.Compose(steps)
 
 
@@ -391,6 +476,7 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
     folder = Path(cfg.output_dir) / architecture / exp.name
     folder.mkdir(parents=True, exist_ok=True)
     run_spec = {"pipeline_version": PIPELINE_VERSION,
+                "augmentation": augmentation_settings(),
                 "config": asdict(cfg), "experiment": asdict(exp),
                 "architecture": architecture, "dataset": manifest["train_sha256"]}
     spec_path = folder / "run.json"
@@ -540,6 +626,25 @@ def paired_comparison(output_dir):
     paired.columns = [f"{architecture}__{metric}" for metric, architecture in paired.columns]
     paired.to_csv(Path(output_dir) / "paired_comparison.csv")
     return paired
+
+
+def comparison_table(output_dir):
+    """Side-by-side model metrics in percent/pp for the notebook and app."""
+    frame = results_table(output_dir)
+    if frame.empty:
+        return frame
+    table = frame.pivot(index="experiment", columns="architecture", values=[
+        "val_top1", "val_average_per_class", "delta_vs_previous_pp", "delta_vs_baseline_pp"])
+    metric_names = {"val_top1": "Val Top-1 (%)", "val_average_per_class": "Val Avg/Class (%)",
+                    "delta_vs_previous_pp": "Change vs Previous (pp)",
+                    "delta_vs_baseline_pp": "Change vs Baseline (pp)"}
+    for metric, architecture in table.columns:
+        if metric.startswith("val_"):
+            table[(metric, architecture)] *= 100
+    table.columns = [f"{architecture}: {metric_names[metric]}" for metric, architecture in table.columns]
+    table.index.name = "Stage"
+    table.to_csv(Path(output_dir) / "comparison_display.csv")
+    return table.round(2)
 
 
 def train_stage(stage_index, cfg, fit, val, names, manifest):
@@ -756,8 +861,9 @@ def final_evaluation(cfg, names, manifest):
     summary.to_csv(out / "test_summary.csv", index=False)
     # Deployment is selected by VALIDATION, irrespective of test ranking.
     import shutil
-    Path("deployment").mkdir(exist_ok=True)
-    shutil.copy2(lock["global_winner"], "deployment/bird_model.pth")
-    write_json("deployment/model_info.json", {**lock, "test_results": results,
+    deployment = out / "deployment"
+    deployment.mkdir(exist_ok=True)
+    shutil.copy2(lock["global_winner"], deployment / "bird_model.pth")
+    write_json(deployment / "model_info.json", {**lock, "test_results": results,
                                               "selection": "validation top1 only"})
     return summary

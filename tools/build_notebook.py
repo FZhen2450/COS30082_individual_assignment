@@ -1,297 +1,215 @@
-"""Generate paired cumulative MobileNetV1 / EfficientNetV2 experiments."""
+"""Generate the fresh, table-based paired augmentation study."""
 from pathlib import Path
 import nbformat as nbf
 
 ROOT = Path(__file__).resolve().parents[1]
 cells = []
-
-
-def md(source):
-    cells.append(nbf.v4.new_markdown_cell(source.strip()))
-
-
-def code(source):
-    cells.append(nbf.v4.new_code_cell(source.strip()))
-
+def md(s):
+    cells.append(nbf.v4.new_markdown_cell(s.strip()))
+def code(s):
+    cells.append(nbf.v4.new_code_cell(s.strip()))
 
 md('''
-# COS30082 - MobileNetV1 vs EfficientNetV2-S, step by step
+# COS30082: MobileNetV1 vs EfficientNetV2-S — fresh paired experiments
+**Student name:** TODO **Student ID:** TODO
 
-**Student name:** TODO &nbsp; **Student ID:** TODO
+Run in order. Each stage trains BOTH architectures before the next stage.
+13 cumulative recipes × 2 architectures = 26 runs. Each recipe restarts from
+the same original ImageNet weights and seed, not the previous bird checkpoint.
+Baseline accuracy is measured honestly; 20–40% cannot be guaranteed or forced.
 
-Two architectures only: width-1.0 **MobileNetV1** and **EfficientNetV2-S**.
-MobileNetV1 uses depthwise + pointwise convolutions, global average pooling and
-a 200-class linear head.
-
-Run each stage cell in order. It trains BOTH models using the same recipe, then
-shows their comparison. Each new recipe keeps ALL methods added previously.
-Recipes restart from their own architecture's same ImageNet weights and seed;
-they do not inherit the previous checkpoint. This controls for extra epochs.
-
-Baseline accuracy of 20-40% is a hope, not a setting or a guaranteed result.
-The baseline is legitimate frozen-backbone transfer learning. Scores may be
-above or below that range; every gain or decline is recorded honestly.
-
-Restart the kernel before running this revised workflow. Keep `birdlab.py` beside
-the notebook. See `ASSIGNMENT_GUIDE.md` for rubric and submission details.
+This revision writes only to **artifacts_retrain_v3**. Old `artifacts` runs are
+preserved and excluded from new comparisons and Streamlit. Stop old training and
+**restart the kernel** before starting. See ASSIGNMENT_GUIDE.md for submission.
 ''')
 md('''
 ## 1. Local GPU environment
-
-Run `powershell -ExecutionPolicy Bypass -File .\\setup_gpu.ps1` once, then select
-`.venv\\Scripts\\python.exe` as the kernel. The global `python` is Python 2.7.
-This project uses PyTorch CUDA 11.8 and `timm==1.0.27` for actual MobileNetV1.
-No Colab / Google Drive / TensorFlow is used. Public pretrained weights are
-cached locally; no hosted app or hosting account is required for training.
+Run `powershell -ExecutionPolicy Bypass -File .\\setup_gpu.ps1` once and select
+`.venv\\Scripts\\python.exe` as the kernel. Global Python is 2.7.
+Full training takes hours. Use one GPU training process at a time.
 ''')
 code('''
-import os
-import sys
+import os, sys, importlib
 from pathlib import Path
 ROOT = Path.cwd().resolve()
-assert (ROOT / "birdlab.py").is_file(), "Open this notebook in the project folder."
+assert (ROOT / "birdlab.py").is_file(), "Open the notebook in the project folder"
 os.environ["TORCH_HOME"] = str(ROOT / ".cache/torch")
 os.environ["HF_HOME"] = str(ROOT / ".cache/huggingface")
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["MPLCONFIGDIR"] = str(ROOT / ".cache/matplotlib")
-import torch
-import torchvision
-import timm
+import torch, torchvision, timm
 print("Python:", sys.executable)
-print("PyTorch:", torch.__version__, "torchvision:", torchvision.__version__, "timm:", timm.__version__)
-assert torch.cuda.is_available(), "Run setup_gpu.ps1 and select the .venv GPU kernel."
+print("Versions:", torch.__version__, torchvision.__version__, timm.__version__)
+assert torch.cuda.is_available(), "Select the .venv GPU kernel"
 print("GPU:", torch.cuda.get_device_name(0))
 print("VRAM GiB:", round(torch.cuda.get_device_properties(0).total_memory / 2**30, 2))
-print("GPU check:", torch.ones(8, device="cuda").sum().item())
 ''')
 md('''
-## 2. Common settings and cumulative recipe table
+## 2. Initialization and fair comparison
+Both backbones are **already pretrained on ImageNet**. Stage 0 freezes the
+backbone and trains a new 200-species linear head. Stage 1 additionally unfreezes
+the backbone after two head-only warm-up epochs, at a lower learning rate.
+This is fine-tuning even on your first bird-data training; new classes or a
+previous bird checkpoint are not required. Fine-tuning changes weights, not
+input pixels, so it has no five-image preview.
+Reference: https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
 
-Input 224px, batch 8, accumulation 4, AMP, Windows workers 0, max 15 epochs.
-Both models start with ImageNet-1k pretrained weights (different pretraining
-recipes; this is a comparison of available pretrained systems).
-MobileNetV1 expects mean/std 0.5; EfficientNetV2 uses ImageNet mean/std.
-The loaders and saved deployment metadata preserve each normalization.
-
-Stage 0 trains only the linear classifier for the whole run, with a frozen
-backbone. Stage 1 adds backbone fine-tuning after 2 head-only warm-up epochs.
-Stages 2-10 keep fine-tuning and cumulatively add one setting at a time.
-The seed, split, resolution, epoch budget, scheduler and BatchNorm policy stay
-fixed. Early stopping and checkpoint selection use validation only.
-
-22 runs total: 11 recipes x 2 architectures. Full training may take hours.
-On OOM, restart the kernel, use batch 4 / accumulation 8, and use a new study
-directory if any run has already been saved with different settings.
+Later recipes retain earlier settings. Split, seed, resolution, 15-epoch maximum,
+early-stopping policy, scheduler and fixed BatchNorm statistics are shared.
+The two pretrained backbones have different pretraining histories. On OOM use
+batch 4 / accumulation 8 in a fresh output folder.
 ''')
 code('''
 import pandas as pd
-import matplotlib.pyplot as plt
 from PIL import Image
 from IPython.display import display, Image as DisplayImage
-# Reload local modules before binding their functions: an existing notebook
-# kernel may still hold a version imported before these files were updated.
-import importlib
 import birdlab
 importlib.invalidate_caches()
 importlib.reload(birdlab)
 import bird_visuals
 importlib.reload(bird_visuals)
 from birdlab import (
-    ARCHITECTURES, Config, experiment_plan, prepare_data, normalization,
-    make_transform, seed_everything, train_stage, results_table,
-    paired_comparison, plot_results, plot_history, history_table, final_evaluation,
-    load_predictor, predict_image,
+    ARCHITECTURES, DEFAULT_OUTPUT_DIR, Config, experiment_plan, prepare_data,
+    train_stage, results_table, paired_comparison, comparison_table,
+    stage_configuration, history_table, final_evaluation, load_predictor, predict_image,
 )
-from bird_visuals import fixed_example, preview_stage, plot_attention_progress
+from bird_visuals import fixed_example, preview_stage
 cfg = Config(
-    data_root=str(ROOT), output_dir="artifacts", seed=42,
+    data_root=str(ROOT), output_dir=DEFAULT_OUTPUT_DIR, seed=42,
     image_size=224, batch_size=8, accumulation_steps=4, num_workers=0,
-    epochs=15, head_epochs=2, patience=5,
-    backbone_lr=3e-5, head_lr=3e-4, pretrained=True, require_gpu=True,
+    epochs=15, head_epochs=2, patience=5, backbone_lr=3e-5, head_lr=3e-4,
+    pretrained=True, require_gpu=True,
 )
 plan = experiment_plan()
+print("CURRENT STUDY:", Path(cfg.output_dir).resolve())
 display(pd.DataFrame([vars(recipe) for recipe in plan]))
 ''')
 md('''
-## 3. Fixed validation split and data-quality audit
-
-4,829 training images, 200 species. Reserve six ambiguous duplicate training
-rows for fit, then stratify unique images: 3,863 fit / 966 validation. Identical
-content never crosses partitions. Keep original labels and document conflicts.
-Save filenames and a content fingerprint in `artifacts/split.json`.
-Official Test (1,204 images) is not used for model selection or tuning.
+## 3. Fixed split and data audit
+4,829 training rows, 200 species. Six ambiguous duplicate rows remain in fit;
+stratifying unique images gives 3,863 fit / 966 validation images. Identical
+content cannot cross this boundary. Original labels are preserved and audited.
+The official 1,204 Test images are held out until all model choices are frozen.
 ''')
 code('''
 fit_df, val_df, class_names, manifest = prepare_data(cfg)
 assert not set(fit_df.sha256) & set(val_df.sha256)
 print("Fit:", len(fit_df), "Validation:", len(val_df), "Species:", len(class_names))
 display(pd.DataFrame(manifest["duplicate_training_rows"]))
-counts = pd.DataFrame({"fit": fit_df.label.value_counts(), "validation": val_df.label.value_counts()}).sort_index()
-display(counts.describe())
-counts.plot(figsize=(12, 3), xlabel="Class ID", ylabel="Images", title="Fit / validation class counts")
-plt.show()
+display(pd.DataFrame({"fit": fit_df.label.value_counts(),
+                      "validation": val_df.label.value_counts()}).sort_index())
 ''')
 md('''
-## 4. Pin ONE validation photo for every method and attention comparison
+## 4. Augmentation examples; model comparisons use tables only
+Use ONE fixed validation photo purely to illustrate changes. Data stays intact.
+Five displayed crops span different area bands and positions; five rotations
+span different angle bands. This deliberate preview selection makes the range
+visible. Actual training independently resamples on every access in every epoch,
+with far more than five possibilities.
+Horizontal = left/right; vertical = up/down. Each flip has two states, so its
+isolated preview shows original + flipped, not five duplicates. The second row
+shows five draws of the full cumulative recipe. Non-pixel methods show settings.
+Grad-CAM panels and model comparison graphs are removed; epoch metrics use tables.
 
-Crop, horizontal flip and rotation are separate stages, so the crop effect is
-not confounded with two other new methods. Before each training stage, inspect
-the new method on the SAME photo: original + 5 examples. Training is NOT limited
-to those five: a random transformation is resampled each time an image is loaded.
-The original dataset is not duplicated on disk or changed.
-
-The second preview row shows five draws from the FULL cumulative recipe.
-Grayscale/erasing effects are forced only in the isolated method illustrations;
-full-recipe previews and training keep their real application probabilities.
-Non-image methods (fine-tuning, dropout, weight decay, label smoothing) show an
-explanation, not a fictional input-image transformation.
-
-After each paired training cell, inspect the same photo's Grad-CAM for both
-models across up to five stages. Target the same TRUE species each time, even
-if predictions change. These heatmaps explain class-related regions, not physical
-temperature. Grad-CAM does not train weights or increase accuracy by itself.
-Untrained stages stay blank. Colors are normalized per map; a visually attractive
-heatmap is not evidence of better accuracy. See https://arxiv.org/abs/1610.02391.
-Validation, Test and Streamlit always classify deterministic, unaugmented inputs.
+Vertical flips, large rotations, false colors and grayscale can remove useful
+bird cues. These are experiments, not guaranteed improvements. Keep declines
+in the report; deploy the validation winner, not automatically the last stage.
+Inverted/tinted RGB photos are **not infrared or thermal measurements**.
 ''')
 code('''
-# Set a specific validation filename before the first run if desired.
-# Once saved, keep this same image/class for all stage comparisons.
-EXAMPLE_FILENAME = None
+EXAMPLE_FILENAME = None  # Optional validation filename; keep fixed once selected.
 example_image_path, example_class = fixed_example(cfg, val_df, EXAMPLE_FILENAME)
-print("Fixed example:", example_image_path.name, "True species:", class_names[example_class])
+print("Example:", example_image_path.name, "True species:", class_names[example_class])
 display(DisplayImage(filename=str(example_image_path), width=380))
 ''')
-
 descriptions = [
-    ("Baseline: frozen backbone", "Only train the 200-class linear head. No random augmentation, dropout, weight decay or label smoothing. Both models use the same training budget; do not stop at a selected accuracy range."),
-    ("Add backbone fine-tuning", "Keep the baseline preprocessing/loss. After 2 head-only warm-up epochs, unfreeze the backbone with a smaller learning rate. Compare with the frozen baseline for BOTH models."),
-    ("Add random crop", "Keep fine-tuning; add RandomResizedCrop only. Display five sampled parts of the SAME image before training both models. New random crops continue to be generated during every epoch."),
-    ("Add horizontal flip", "Keep fine-tuning + random crop; add horizontal flip with probability 0.5."),
-    ("Add mild rotation", "Keep all previous methods; add random rotation from -10 to +10 degrees."),
-    ("Add color augmentation", "Keep all previous methods; add mild ColorJitter."),
-    ("Add dropout", "Keep all previous methods; add classifier dropout=0.3."),
-    ("Add weight decay", "Keep all previous methods; add AdamW weight_decay=0.001."),
-    ("Add label smoothing", "Keep all previous methods; add label_smoothing=0.1."),
-    ("Add random erasing", "Keep all previous methods; add random erasing with probability 0.15."),
-    ("Add grayscale experiment", "Keep all previous methods; add grayscale with probability 0.2. This tests reduced color dependence; it is not guaranteed to help."),
+    ("Frozen-backbone baseline", "Train only the new linear classifier; no random augmentation or added regularization."),
+    ("Backbone fine-tuning", "Two head-only warm-up epochs, then unfreeze backbone at a smaller learning rate. Input images stay identical."),
+    ("Random resized crop", "Area 40–100%, aspect ratio 0.75–1.33. Five examples cover different sizes/positions; runtime crops are independently random."),
+    ("Horizontal flip", "Left/right reversal, probability 0.5."),
+    ("Vertical flip experiment", "Up/down reversal, probability 0.2; this may be unnatural for upright birds."),
+    ("Random rotation", "Uniform random angle −45° to +45°. Five previews cover different angle bands."),
+    ("Stronger ColorJitter", "Brightness ±0.4, contrast ±0.4, saturation ±0.5, hue ±0.1; random strengths and order."),
+    ("Inversion and color-layer experiment", "Total probability 0.25: inversion or red/green/blue/yellow overlay. Conditional weights 10/25/25/25/15%; tint opacity random 20–45%. Preview forces each effect."),
+    ("Classifier dropout", "Add dropout p=0.3; feature regularization, not an image transformation."),
+    ("Weight decay", "Add AdamW weight decay 0.001."),
+    ("Label smoothing", "Add smoothing 0.1. Displayed Train Loss remains unsmoothed cross-entropy for comparability."),
+    ("Random erasing", "Probability 0.25, area 2–15%, fill with model normalization mean."),
+    ("Grayscale experiment", "Probability 0.2; reduced color dependence can help or hurt."),
 ]
-for index, (title, description) in enumerate(descriptions):
-    md(f"## Stage {index}. {title}\n\n{description}\n\nRun this cell after the previous paired stage. Completed runs skip; interrupted runs resume from the last completed epoch. Both models appear before moving to the next recipe.")
+for i, (title, description) in enumerate(descriptions):
+    md(f"## Stage {i}: {title}\n\n{description}\n\nRetain all earlier settings. Run after the previous paired stage. Completed runs skip; interrupted runs resume from the last saved epoch in THIS study only.")
     code(f'''
-# SAME original + five examples of this method, then the full cumulative recipe.
-for preview_path in preview_stage({index}, example_image_path, cfg, n_examples=5):
+display(stage_configuration({i}, cfg))
+for preview_path in preview_stage({i}, example_image_path, cfg, n_examples=5):
     display(DisplayImage(filename=str(preview_path)))
 ''')
     code(f'''
-stage_results = train_stage({index}, cfg, fit_df, val_df, class_names, manifest)
-display(stage_results[["architecture", "experiment", "val_top1", "val_average_per_class",
-                       "delta_vs_previous_pp", "delta_vs_baseline_pp", "gap", "best_epoch"]].style.format({{
-    "val_top1": "{{:.2%}}", "val_average_per_class": "{{:.2%}}", "gap": "{{:.2%}}",
-    "delta_vs_previous_pp": "{{:+.2f}}", "delta_vs_baseline_pp": "{{:+.2f}}",
-}}))
-plot_results(cfg.output_dir)
-''')
-    first = (index // 5) * 5
-    last = min(first + 5, len(descriptions))
-    code(f'''
-# Explanation only: compare real trained checkpoints on the unchanged photo.
-# Untrained columns are placeholders; this does not modify or train the models.
-attention_path = plot_attention_progress(
-    cfg, example_image_path, example_class, stage_indices=range({first}, {last}))
-display(DisplayImage(filename=str(attention_path)))
-''')
-    code('''
-# Standard per-epoch accuracy/loss from CSV, including already completed runs.
+stage_results = train_stage({i}, cfg, fit_df, val_df, class_names, manifest)
+display(comparison_table(cfg.output_dir))
 for checkpoint in stage_results.checkpoint:
     print(Path(checkpoint).parent.parent.name, Path(checkpoint).parent.name)
     display(history_table(checkpoint).round(4))
-    plot_history(checkpoint)
 ''')
-
 md('''
-## 5. Compare all paired stages (validation only)
+## 5. Validation comparison table
+Top-1 = correct images / all images. Average per-class accuracy = macro recall
+over the 200 species. Accuracy columns are percentages. Changes are percentage
+points: 30% → 40% = +10 pp. Previous-stage delta measures the added method GIVEN
+earlier methods; it is not its isolated effect. Baseline delta is cumulative.
+These are single-seed observations; keep both gains and declines.
 
-Top-1 = correct images / all images. Average accuracy per class = mean recall
-across the 200 true species. It is not one-vs-rest binary accuracy.
-
-`delta_vs_previous_pp` measures the newly added method in the context of all
-earlier methods. `delta_vs_baseline_pp` measures total change since stage 0.
-A change from 30% to 40% is +10 percentage points. Declines remain visible.
-This cumulative experiment does not measure each method in isolation or prove
-statistical significance from one seed. The best recipe may be an EARLIER stage.
-
-Fit-eval curves use unaugmented inputs with dropout off; compare these with
-validation to diagnose overfitting. Loss curves use unsmoothed cross entropy
-even when the optimized training objective uses label smoothing.
+Every epoch logs Train Accuracy, Train Loss, Val Accuracy and Val Loss.
+Online Train Accuracy includes training augmentations; Train Eval Accuracy uses
+deterministic inputs. Its difference from Val Accuracy is the clean gap.
+Best identifies the validation-selected epoch, not another accuracy metric.
 ''')
 code('''
-comparison = results_table(cfg.output_dir)
-display(paired_comparison(cfg.output_dir))
-for architecture in ARCHITECTURES:
-    winner = comparison[comparison.architecture == architecture].sort_values(
-        ["val_top1", "experiment"], ascending=[False, True]).iloc[0]
-    print("Validation winner:", architecture, winner.experiment, f"{winner.val_top1:.2%}")
-    plot_history(winner.checkpoint)
-# First five stages on exactly the same image and target class; later stages in
-# additional panels. These are real model explanations, not synthetic thermal data.
-for start in range(0, len(plan), 5):
-    panel = plot_attention_progress(cfg, example_image_path, example_class,
-                                    range(start, min(start + 5, len(plan))))
-    display(DisplayImage(filename=str(panel)))
+display(comparison_table(cfg.output_dir))
+paired_comparison(cfg.output_dir)  # Separate machine-readable fraction-valued CSV.
+all_results = results_table(cfg.output_dir)
+if not all_results.empty:
+    winner = all_results.sort_values("val_top1", ascending=False).iloc[0]
+    print("Validation winner:", winner.architecture, winner.experiment, f"{winner.val_top1:.2%}")
+print("Readable table:", Path(cfg.output_dir) / "comparison_display.csv")
 ''')
 md('''
-## 6. Final Test evaluation - only after all paired stages
-
-Lock the baseline and validation winner for each architecture before opening
-Test. The deployment model is the global validation winner, regardless of test
-ranking. No further training/tuning against the viewed Test results.
-
-Report official complete-Test metrics and a supplementary clean subset excluding
-four byte-identical Train/Test overlaps. Outputs include both required metrics,
-per-class CSVs, confusion matrices and correct/incorrect prediction examples.
+## 6. Final Test — only after all stages
+Freeze all choices first. Evaluate both baselines and each architecture's best
+validation recipe. Four known Train/Test overlaps are reported, alongside clean
+metrics excluding them. The selection lock prevents tuning from repeated Test
+feedback. Exports stay inside the current study.
 ''')
 code('''
-test_summary = final_evaluation(cfg, class_names, manifest)
-display(test_summary)
-print("Exported deployment/bird_model.pth and deployment/model_info.json")
+test_results = final_evaluation(cfg, class_names, manifest)
+display(test_results)
+print("Export:", Path(cfg.output_dir) / "deployment/bird_model.pth")
 ''')
 md('''
-## 7. Test the exported model
+## 7. Streamlit and photo testing
+Streamlit reads only this study. Before new checkpoints exist it shows a pending
+message. Upload a photo for Top-5 predictions and inspect tables/augmentations.
+In another terminal: `.\\.venv\\Scripts\\python.exe -m streamlit run app.py`
 ''')
 code('''
-predictor, checkpoint = load_predictor("deployment/bird_model.pth", "cpu")
-with Image.open(ROOT / "Test/0000.jpg") as image:
-    display(image.resize((320, 320)))
-    display(predict_image(predictor, checkpoint, image))
-del predictor
+PHOTO_PATH = None  # Set your image filename after training.
+if PHOTO_PATH:
+    model, checkpoint = load_predictor(Path(cfg.output_dir) / "deployment/bird_model.pth", "cpu")
+    with Image.open(PHOTO_PATH) as photo:
+        display(photo.copy())
+        display(predict_image(model, checkpoint, photo))
 ''')
 md('''
-## 8. Streamlit and submission
-
-After training, run in a terminal:
-```
-.venv\\Scripts\\python.exe -m streamlit run app.py
-```
-Demonstrate image upload, Top-5 predictions, model selection and stage-by-stage
-comparison charts. The teacher has approved Streamlit for the web application.
-
-Submit a <=4-page PDF with name/ID, Methodology and Result and Discussion,
-real experimental evidence and both required test metrics. Record a <=10-minute
-video explaining models/code/results and demonstrating Streamlit; include the
-YouTube link and Streamlit run instructions in the report.
-Generate the source ZIP after training:
-```
-.venv\\Scripts\\python.exe tools/package_source.py
-```
-The ZIP excludes weights, image folders and environments. Do not use smoke-test
-scores as assignment results. No final accuracy is claimed before full training.
+## 8. Submission
+Follow ASSIGNMENT_GUIDE.md: report PDF (Methodology; Result and Discussion), code
+ZIP and presentation video/link. Fill name/ID. Teacher approved Streamlit; keep
+that approval. After training run `.\\.venv\\Scripts\\python.exe tools/package_source.py`
+to include this study's results. Dataset images and model weights are excluded;
+provide trained weights separately if requested.
 ''')
-
-notebook = nbf.v4.new_notebook(cells=cells, metadata={
-    "kernelspec": {"display_name": "Python 3 (.venv GPU)", "language": "python", "name": "bird-local-gpu"},
+nb = nbf.v4.new_notebook(cells=cells, metadata={
+    "kernelspec": {"display_name": "Python (.venv GPU)", "language": "python", "name": "python3"},
     "language_info": {"name": "python", "version": "3.13"},
 })
-nbf.validate(notebook)
-nbf.write(notebook, ROOT / "Bird_Classification_Local_GPU.ipynb")
-print(f"Created {len(cells)} cells: 11 paired cumulative stages with fixed-image previews and Grad-CAM")
+nbf.validate(nb)
+nbf.write(nb, ROOT / "Bird_Classification_Local_GPU.ipynb")
+print(f"Generated {len(cells)} cells; fresh outputs and table-only comparisons.")

@@ -1,166 +1,82 @@
-# 作业要求与实验安排
+# 作业要求与新版实验安排
 
-依据 `Assignment1_v2.pdf` 第 1–3 页，并按老师最新同意的方案，将应用展示改为 Streamlit。原始 PDF 保留不变；其中 Hugging Face 的要求由这项老师确认的调整替代。
+依据 `Assignment1_v2.pdf`，任务是个人完成 200 类鸟类分类，占 20%。老师已同意用 **Streamlit**，保留这项确认作为依据；原始 PDF 不变。
 
-## 要交什么
+## 提交内容
 
-这是个人作业，占 20%，任务是 200 类鸟类图片分类。
+1. **最多 4 页 PDF 报告**，姓名与学号，主体为 Methodology、Result and Discussion。
+2. **Python 源码 ZIP**，有注释并能说明实现。
+3. **最长 10 分钟视频**：解释 CNN、训练方案、关键代码、实验结果，并演示 Streamlit。
+4. 报告附 YouTube 视频链接与 Streamlit 运行说明；有线上部署再附应用链接。
 
-1. **PDF 报告，最多 4 页**，包含姓名与学号。两个主体部分：Methodology、Result and Discussion。
-2. **Python 源码 ZIP**，代码要有充分注释，体现你理解实现。
-3. **最长 10 分钟视频**：解释概念与模型设计、介绍代码、展示训练及结果、演示 Streamlit AI 网页应用。建议配 slides。
-4. 报告包含 **YouTube 视频链接**，并说明 Streamlit 应用如何运行；若有线上部署，可附应用链接。不再要求 Hugging Face 链接。
+`submission` 是本地整理提交材料的文件夹，不代表必须把整个文件夹交上去。打包脚本生成其中的 `COS30082_source.zip`；报告 PDF 和源码 ZIP 按课程提交入口要求一起提交，视频按要求提供链接。权重和数据图片不在源码 ZIP 中，若老师另行要求权重，应另附文件或链接。
 
-报告必须写模型架构、loss、hyperparameters、避免 overfitting 的方法、不同模型表现的比较，以及最佳模型的选择理由。
+## 新一轮怎样开始
 
-PDF 本身没有规定必须先训练出很差的模型。你的老师补充的 baseline 思路应理解为：先建立真实基准，再用实验判断改进是否有效，不能故意训练失败或编造提升。
+停止旧训练，Restart Kernel，选择 `.venv\Scripts\python.exe`，从 notebook 顶部顺序运行。新版会把旧输出清空，代码重新生成；已有模型文件不删除。
 
-## 两个必报指标
+**正式新结果只写 `artifacts_retrain_v3`。** 旧 `artifacts` 不参与新表格、Streamlit 或提交打包。每个阶段两个模型都完成再进入下一阶段；中断可从该轮最后完整 epoch 恢复。改训练参数时另设新文件夹，避免混用实验。
 
-- **Top-1 accuracy**：全部测试图片中预测正确的比例。
-- **Average accuracy per class**：先算每个真实类别中预测正确的比例，再对 200 个类别平均。也就是 macro recall，不是每类 one-vs-rest 二元 accuracy。
+两个架构是 MobileNetV1 width 1.0 和 EfficientNetV2-S。13 阶段 × 2 架构，共 26 次训练，不是增加到 26 个架构。每次从同一套初始 ImageNet 权重与 seed 开始，避免后期方法因额外训练时间而占优势。
 
-例如 accuracy 从 70% 到 75%，提升是 **5 个百分点（pp）**。程序自动计算相对 baseline 的正负变化。
-
-训练日志每个 epoch 明确显示 **Train Loss、Train Accuracy (Top-1)、Val Loss、Val Accuracy (Top-1)**，并附上 Val Average Accuracy per Class、Best Val Accuracy、Train Eval Accuracy 和泛化差距（pp）。每个阶段之后都有两模型各自的完整 epoch 表格和曲线；已完成的训练可从 `history.csv` 重新展示，不需要重训。
-
-Train Accuracy 来自训练过程中实际使用的 batch（可能带增强和 dropout）；Train Eval Accuracy 则是关闭随机增强和 dropout 后重新评估训练集的准确率。Gap 使用后者减去 Val Accuracy，不能把这两种训练集准确率混为一谈。Train/Val Loss 图统一画未平滑的交叉熵，label smoothing 的实际优化目标另存为 `train_objective`。
-
-报告中两项必需指标最终要在保留的 Test 集上报告；训练时的 Train/Val Accuracy 用于展示学习过程、选模型和分析过拟合，不能代替最终 Test 结果。
-
-## 本次采用的两个架构
-
-- **MobileNetV1（width multiplier=1.0）**：使用 depthwise + pointwise 卷积、global average pooling 和 200 类线性分类头，作为结构简单的第一个模型。
-- **EfficientNetV2-S**：作为第二个模型；不用原 notebook 中的 V2-M 和 ConvNeXt。
-
-“最多两个 model”在这里按**最多两个架构**理解。目前是 11 个累加方案 × 2 个架构，共 22 次训练。每个阶段先展示同一张图的增强效果，再完成两个模型并展示对比，之后进入下一阶段。
-
-第一次训练使用合理的简单 baseline：冻结 ImageNet 预训练骨干，只训练新的 200 类分类头。你希望看到的 **20–40% 是预期范围，不是保证值**；不能在达到某个低准确率时故意停止、错误预处理或修改数据来凑结果。两个模型的真实 baseline 也不一定相同。
-
-## 怎样比较各种方法
-
-| 阶段 | 在上一步基础上新增的设置 | 两个模型都要比较的问题 |
-|---|---|---|
-| 00 baseline | 冻结骨干，只训练分类头；无随机增强和额外正则化 | 初始 validation accuracy 如何？ |
-| 01 fine tune | 解冻骨干，先 warm-up 分类头再微调 | 相对冻结骨干改善多少？ |
-| 02 random crop | 保留微调，只新增随机裁剪与缩放 | crop 加进当前方案带来多少变化？ |
-| 03 horizontal flip | 保留前面设置，再加水平翻转 | 翻转带来多少变化？ |
-| 04 rotation | 保留前面设置，再加小角度旋转 | 旋转带来多少变化？ |
-| 05 color | 保留前面设置，再加温和 ColorJitter | 光照鲁棒性是否改善？ |
-| 06 dropout | 保留前面设置，再加 dropout=0.3 | 泛化差距是否缩小？ |
-| 07 weight decay | 保留前面设置，再加 weight_decay=0.001 | 权重正则化是否进一步改善？ |
-| 08 label smoothing | 保留前面设置，再加 smoothing=0.1 | 是否进一步改善准确率？ |
-| 09 erasing | 保留前面设置，再加随机擦除 | 遮挡增强是否有效？ |
-| 10 grayscale | 保留前面设置，再加 20% 概率灰度化 | 减少颜色依赖会改善还是损害细粒度分类？ |
-
-这是**方法设置的逐步累加**。每个方案都重新从同一架构的相同 ImageNet 权重与分类头种子开始，保持相同训练预算；不接着上一阶段 checkpoint 多训练一轮，避免把额外训练时间误当成方法收益。
-
-每一步都报告 MobileNetV1 与 EfficientNetV2-S 的两项 validation 指标、相对上一阶段的变化、相对 baseline 的总变化；输出 `comparison.csv` 和横向排列的 `paired_comparison.csv`。负提升也照实展示，最终最佳方案可能是较早的某一步。这是累加配置比较，不是各方法单独作用的消融实验。
-
-所有方案保持相同数据划分、随机种子、分辨率、最大 epoch 数、scheduler、early stopping 和固定 BatchNorm 统计。baseline 全程冻结骨干；01 之后前 2 个 epoch 只训练分类头，再解冻微调。
-
-MobileNetV1 使用 `timm==1.0.27` 的 `mobilenetv1_100.ra4_e3600_r224_in1k` 预训练骨干；它仍是 V1 架构。输入 mean/std 为 0.5，EfficientNetV2-S 使用其 ImageNet mean/std；训练、评估与 Streamlit 分别保持一致。首次公开权重下载后本地缓存，不需要部署账号。两套权重的预训练配方不同，结果应表述为预训练系统的比较。
-
-**random shape** 这里实现为合理的几何变化，不随意扭曲鸟的身体形状。**灰度不等于红外线**：现有 RGB 图像没有真实红外或热成像信息，所以不会把滤镜或灰度伪称为红外数据。
-
-## 同一张图的五个增强样本，以及关注区域演化
-
-“先展示方法，再训练两个模型、比较 accuracy，重复下一种方法”符合分类作业的泛化与过拟合分析方向。当前 notebook 按这个顺序组织：
-
-1. **固定图片**：从 validation 选一张，保存文件名、内容 hash 和真实类别。所有步骤与两个模型用同一张图作解释展示，不使用 Test 选示例。
-2. **先看新方法**：裁剪时显示原图、5 个裁剪框和对应的 5 张局部图；翻转、旋转、颜色、擦除、灰度也各展示 5 个样本。另一行展示当前全部累加增强共同作用的 5 个样本。
-3. **训练两个模型**：每一步都训练 MobileNetV1 与 EfficientNetV2-S，报告两项 validation accuracy、相对上一阶段变化，以及相对 baseline 的总变化。
-4. **看模型关注哪里**：用该步真正训练完成的 checkpoint，对未增强的固定图片生成 Grad-CAM，与前面步骤横向比较。前 5 步一组，后续另外分组；两行分别对应两个模型。未训练完成的步骤显示空位。
-
-**展示 5 张不代表只训练 5 个 crop。** DataLoader 每次读训练图都会重新随机裁剪或进行其他随机增强，跨 epoch 持续产生不同样本，不会把原图固定切成只有 5 张，更不会把 validation 展示图片加入训练。裁剪保留原图约 75%–100% 面积，尽量避免把鸟完全切掉，但仍需检查预览。
-
-裁剪在与 baseline 相同的统一缩放后执行，避免长宽比较大的照片因参数约束而总是退回固定中心裁剪；预览框会映射回原图坐标。程序保存裁剪坐标、固定图片 hash 和预览种子，预览之后恢复 RNG 状态，不改变后续训练随机序列。
-
-随机增强包含“不应用”的概率，所以翻转示例可能重复；单项擦除/灰度预览为了看清效果会强制展示变换，图中注明。实际训练和整套增强预览使用真实概率（擦除 15%、灰度 20%）。dropout、weight decay、label smoothing、解冻微调不是图片滤镜，只展示设置与作用说明，不伪造处理后的图片。
-
-**热成像与 Grad-CAM 不能混称。** RGB 图像没有真实温度信息，物理热量检测超出现有数据能支持的范围；这里用模型解释图展示“同一张图从第一步到第五步的关注变化”。[Grad-CAM](https://arxiv.org/abs/1610.02391) 利用梯度生成与目标类别有关的区域图，适合定性分析，不是训练增强方法，本身不提高 accuracy。
-
-每个 checkpoint 都解释**同一个真实鸟种**，不随预测类别改变目标。热力图分别归一化，颜色不能读成摄氏温度或跨模型的绝对数值，也不能凭关注区域好看就说模型更准。准确率收益由验证集对比表判断；累加配置的变化说明该方法在已有设置下的边际效果，不等于单独使用时的收益。
-
-图片和元数据保存到 `artifacts/visualizations/`。Streamlit 的 **Stage visuals** 页面可以浏览；源码 ZIP 包含已生成的 PNG 和 JSON，方便报告与视频使用。
-
-## 数据检查发现的问题
-
-- Train：4,829 张；Test：1,204 张；标签 0–199，共 200 类，标注对应文件均存在。
-- Train 中有 3 对 byte-identical 图片，且每对存在类别标签冲突：Crested / Parakeet Auklet、Philadelphia / Warbling Vireo、Red eyed Vireo / Tennessee Warbler。保留原始标注，在报告中披露这一限制。
-- 按内容 hash 把 6 张重复图片保留在 fit，再对其余独立图片分层抽样：fit 3,863 张，validation 966 张。200 类均保留，相同图片不会横跨两个分区。
-- Test 中 `0197.jpg`、`0273.jpg`、`0918.jpg`、`0976.jpg` 与 Train 图片完全相同。原始 Test 不删除；最后同时报告原始完整测试集指标和去掉这 4 张后的补充指标。
-- 训练阶段完全不使用 Test 来选 checkpoint、方法或学习率。模型按 validation Top-1 选择，最终才打开 Test。
-
-## 从哪里开始
-
-1. PowerShell 中运行 `powershell -ExecutionPolicy Bypass -File .\setup_gpu.ps1`。
-2. 打开 `Bird_Classification_Local_GPU.ipynb`，在 VS Code 右上角选择 `.venv\Scripts\python.exe` kernel。
-3. 顺序运行：GPU 检查 → 参数 → 数据划分 → 增强预览 → MobileNet baseline。
-4. Stage 0 完成两个 baseline 后查看真实 learning curves，再顺序运行 Stage 1–10；每步按“预览 → 两模型训练和 accuracy 对比 → 同图 Grad-CAM 对比”执行。完整实验可能需要数小时。
-5. 实验完成后看 `comparison.csv`、准确率与增益图，写出真实结论。训练曲线中 fit-eval 明显高于 validation 才是需要讨论的过拟合证据之一，不能只看 training accuracy。
-6. 最后运行 Test evaluation，导出模型；终端运行 `.venv\Scripts\python.exe -m streamlit run app.py`。
-7. 在 Streamlit 中演示上传鸟类图片、Top-5 预测和实验对比，录视频，然后写报告。本机运行即可按上述命令准备演示；训练前没有最终准确率或可提交的训练成果。
-
-若 CUDA out of memory，重启 kernel，改 batch_size=4、accumulation_steps=8，用新的 output_dir 重跑。更改模型配置时不能覆盖原实验。相同配置重跑会续训或跳过已完成实验。
-
-## 建议 4 页报告结构
-
-1. **Methodology**：数据与 split、重复数据问题、两个架构、ImageNet transfer learning、输入预处理、loss 和训练参数。
-2. **Methodology / Experiments**：baseline 与逐步累加设置表、控制变量、每步两模型对比、checkpoint 选择原则。
-3. **Result and Discussion**：真实 validation 对比表与曲线、过拟合分析、两项最终 Test 指标，并附去重复后的补充指标。
-4. **Result and Discussion**：错误样本、颜色或形状相近类别的混淆、模型选择理由、4GB/224px/单随机种子的限制；YouTube 链接与 Streamlit 演示/运行说明（若已线上部署，可附链接）。
-
-姓名、学号和链接必须自己补上。没有训练完成前，不应编写虚构的 accuracy、讨论或最终报告。
-
-## 按最新 rubric 对齐评分
-
-以下依据你提供的 rubric，总分 **20 分**。其中应用评分仍写 Gradio；本项目按老师已同意的调整使用 **Streamlit**，保留对应用设计与展示质量的要求。
-
-| 评分项 | 分值 | 高分需要展示什么 | 当前状态与下一步 |
-|---|---:|---|---|
-| Report | 7 | 连贯解释 CNN 架构、训练方案和方法差异；用额外定量与定性结果支撑发现 | 实验输出流程已准备；完整训练后才能写真实比较和讨论 |
-| Video presentation | 3 | 清晰解释所用 CNN 和代码，展示对方法的理解，而不只是播放运行画面 | 录制尚未完成；需讲清为什么选这两个模型，以及实际改进是否有效 |
-| Model deployment and web application | 3 | 完整、易用、设计清楚的模型应用，展示质量超出基础功能 | Streamlit 已有上传、Top-5、模型选择和实验图表；训练后需检查真实使用流程并录制演示 |
-| AI modeling framework | 7 | 数据输入、预处理、loader、架构、优化器、指标和训练方案完整；有泛化设计并取得良好准确率 | 训练流程已做小样本验证；正式泛化表现与准确率仍待完整实验验证 |
-
-**代码能运行，不等于已达到高分档。** 目前完成的是实现与流程验证；rubric 中要求的准确率、有效改进和研究发现，必须由实际训练结果支持。rubric 没有给出明确的 accuracy 分数线，不能承诺某个准确率就一定满分。
-
-### 报告中最值得保留的证据
-
-在 4 页限制内，建议优先放以下内容，而不是把所有输出截图塞进报告：
-
-1. **一个精简实验表**：逐步累加阶段中两个架构的 validation Top-1、Average accuracy per class、相对上一步与 baseline 的变化（pp）。明确哪些步骤没有提升，单种子结果不当作统计显著结论。
-2. **两组关键 learning curves**：各架构 baseline 与 validation 最佳方案的 fit-eval / validation 曲线；结合准确率差距和 loss 讨论过拟合，而不是只写“使用了 dropout”。
-3. **一个最终测试表**：两个架构的 baseline 与 validation 最佳方案，报告两项必需指标；模型选择不能依据这个测试表重新调整。
-4. **少量正确与错误样本**：说明哪些鸟类容易混淆，以及颜色、姿态、背景或裁剪可能造成的影响。观察到的现象与未经验证的原因要分开描述。
-5. **数据质量发现**：披露重复图与冲突标签、说明如何避免 fit/validation 泄漏，并比较完整 Test 与去重复子集指标。这个发现有助于支撑分析深度，但不能保证额外得分。
-
-具体可分析的问题包括：加入颜色增强有没有破坏细粒度的羽毛颜色线索？最后加入灰度是否降低表现？累加更多设置是否反而不如较早阶段？较大的模型是否值得额外训练时间？这些都要等真实结果出来再回答；不能把累加方案中的变化解释为方法在所有场景下的独立效果。
-
-完整的 200×200 confusion matrix 放在结果文件里；报告优先选择少数典型混淆类别或错误图片，保证图中文字可读。两个模型的结构说明应涉及实际采用的模块、200 类分类头、冻结/解冻策略和 loss，不能只列模型名称。
-
-### 视频建议安排（控制在 10 分钟内）
-
-| 时间 | 内容 |
+| Stage | 新增方法，保留前面所有设置 |
 |---|---|
-| 0:00–1:00 | 200 类分类任务、数据集与两项评估指标 |
-| 1:00–3:00 | 两个 CNN 的主要结构、transfer learning、分类头与训练方案 |
-| 3:00–5:00 | 关键代码：split、增强、loader、优化器、checkpoint 与指标计算 |
-| 5:00–7:00 | 展示训练记录、baseline/改进对比、过拟合与错误分析 |
-| 7:00–9:00 | Streamlit 实际上传预测、Top-5、模型选择与实验对比 |
-| 9:00–9:30 | 有证据支持的最佳方案、局限与结论，保留少量时间余量 |
+| 0 | 冻结 ImageNet backbone，只训练新 200 类分类头 |
+| 1 | 前 2 epoch 训练分类头，再解冻 backbone、用较小 LR 微调 |
+| 2 | RandomResizedCrop：面积 40–100%，长宽比 0.75–1.33 |
+| 3 | 左右 horizontal flip，p=0.5 |
+| 4 | 上下 vertical flip，p=0.2 |
+| 5 | 均匀随机旋转 −45° 到 +45° |
+| 6 | 更强 ColorJitter：亮度/对比度 0.4、饱和度 0.5、色调 0.1 |
+| 7 | 反色、红/绿/蓝/黄色层，总概率 0.25，色层强度随机 20–45% |
+| 8 | 分类头 dropout 0.3 |
+| 9 | AdamW weight decay 0.001 |
+| 10 | Label smoothing 0.1 |
+| 11 | Random erasing，p=0.25，面积 2–15% |
+| 12 | Grayscale，p=0.2 |
 
-不用在视频里等待完整训练；展示已保存的实际训练记录，并讲清如何生成结果。避免逐行朗读全部代码，重点解释设计选择和证据。
+Stage 7 触发后，五种效果的条件概率依次为 10/25/25/25/15%，所以训练图片访问中约 2.5% 会反色。它是额外实验，并非必然有益的默认结论。五个单项示例强制展示各效果，完整配方预览和训练使用实际概率。
 
-### Streamlit 应用的演示检查
+第一次训练你的鸟数据也能 fine-tune：backbone 已经在 ImageNet 训练过。冻结分类头之外的层是迁移学习策略，随后解冻适应鸟类；并非只有新增类别才需要。它修改权重，不修改图片，所以只展示设置表。Dropout、weight decay、label smoothing 同样不伪造输入图片。
 
-- 图片预览、预测鸟种、Top-5 概率是否清楚，模型与实验名称是否易于理解。
-- 同一张图片可以切换已训练模型查看差异；概率高不代表一定正确，也不能当作总体 accuracy。
-- 实验对比图是否标清 validation、百分比和提升百分点；最终 Test 结果与 validation 结果是否可区分。
-- 上传无效图片或尚未有 checkpoint 时，是否给出清楚提示；演示前需用真实训练权重完成一次完整操作。
-- 当前页面已有上述主要功能，但还不能仅凭功能清单断言符合 rubric 的 outstanding design；真实使用体验与演示清晰度仍需检查。
+五张 crop 示例覆盖不同面积区间与位置；五张 rotation 示例覆盖不同角度区间，让变化容易看清。训练每次加载图片都会独立随机抽样，远不止五种。左右翻转和上下翻转是两个不同阶段，每种只有原图/翻转两种状态。预览保留同一张 validation 原图与 hash，并恢复 RNG，不改变训练数据与随机序列。
 
-### 接下来优先做什么
+反色、强色层、上下翻转可能破坏羽毛颜色或姿态线索。**不保证每一步提高 accuracy**；负提升也是实验发现。RGB 色层不是红外线或温度检测。模型比较图片与 Grad-CAM 已移除，保留增强示例及结果表格。
 
-先跑完 MobileNet baseline 并看曲线，再完成两个架构的对照实验；在查看 Test 前完成验证集分析与方案选择。随后运行最终评估、检查 Streamlit 真实预测流程，最后写报告与录视频。优先投入时间在 rubric 共占 **14/20 分**的报告和建模证据上，同时完成应用与视频的展示要求。
+## 指标和对比表格
+
+每个 epoch 显示 **Train Accuracy、Train Loss、Val Accuracy、Val Loss**。另列 Val Average Accuracy per Class、Best Val Accuracy、Train Eval Accuracy、Gap。Best 是验证集选择的最好 epoch；Gap 是关闭随机增强/dropout 的 Train Eval Accuracy 减 Val Accuracy。在线 Train Accuracy 用实际训练 batch，两者不能混淆。
+
+展示的训练/验证 loss 都是未平滑交叉熵；平滑后的优化目标另存 `train_objective`。每个阶段结束后显示两模型的完整 epoch 表与逐阶段比较表。新版不自动画比较图或训练曲线。
+
+最终必须报告 Test 的 **Top-1 accuracy** 和 **Average accuracy per class（200 类 macro recall）**，不是只报告 Train/Val。Test 只在所有配方完成并冻结选择后打开；比较两个 baseline 与各自 validation 最佳方案。最后一步未必最好。
+
+`comparison_display.csv` 中 accuracy 为百分数，变化为百分点 pp。例如 30% 到 40% 是 +10 pp。`paired_comparison.csv` 是机器可读版本，accuracy 为 0–1。Previous delta 是在前面方法已存在的条件下新增方法的变化，不能解释为单独使用该方法的收益。单 seed 不声称统计显著性，不能人为把 baseline 压到 20–40%。
+
+## 数据与报告证据
+
+Train 4,829，Test 1,204，200 类。Train 有 3 对内容完全相同且标签冲突的图片，六行保留 fit；其余分层划分得到 fit 3,863 / validation 966，双方包含全部类别，内容不泄漏。保持原标签并披露局限。
+
+Test 的 `0197.jpg`、`0273.jpg`、`0918.jpg`、`0976.jpg` 与 Train 内容重复。保留官方完整 Test，同时提供移除四张后的 clean 指标。Test 不能用来调整增强、LR 或选择模型。
+
+| Rubric | 分数 | 报告和演示要体现的证据 |
+|---|---|---|
+| Report | 7 | 架构、训练方案、定量比较、定性分析及有根据的发现 |
+| AI modeling framework | 7 | 数据/loader、预处理、优化、指标、训练、泛化设计与实际准确率 |
+| Video | 3 | 清楚解释方法、代码与真实结果，展示理解 |
+| Deployment/web | 3 | 依老师同意用 Streamlit，展示可用预测及清晰结果表 |
+
+报告优先放精简逐阶段表、baseline/最佳方案的关键 epoch 指标表、最终 Test 表、少量真实错误案例及数据质量发现。解释两个 CNN 的具体结构、分类头、冻结解冻、loss、超参数。讨论强颜色增强是否破坏物种线索、垂直翻转是否有害、模型表现与训练成本。把观察与推测区分开。代码运行成功不等于达到高分档，结论必须有真实结果支持。
+
+视频建议：任务/指标 1 分钟，CNN 与迁移学习 2 分钟，关键代码 2 分钟，结果分析 2 分钟，Streamlit 上传/Top-5/模型切换/对比表 2 分钟，局限与结论半分钟。不要在视频中等待完整训练。
+
+## 应用与打包
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app.py
+.\.venv\Scripts\python.exe tools/package_source.py
+```
+
+应用只读取新 study，可选择 checkpoint、上传图片、查看 Top-5、逐阶段/逐 epoch 表和增强示例。单张图片概率不是整个模型 accuracy。最终部署文件为 `artifacts_retrain_v3/deployment/bird_model.pth`，包含预处理及类别映射。没有新 checkpoint 时显示待训练状态。
+
+打包只收集源码和新 study 的 CSV/JSON/PNG，不带旧实验、模型权重、环境、cache 或数据图片。完整训练后重新打包再交。姓名学号、报告、视频录制仍需你完成。

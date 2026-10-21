@@ -29,13 +29,13 @@ def main():
                 lines.append(f"{name} {label}")
             (tmp / f"{split.lower()}.txt").write_text("\n".join(lines))
         out = tmp / "artifacts"
-        names = b.read_json(ROOT / "smoke_artifacts/split.json")["class_names"]
+        names = b.read_json(ROOT / "smoke_artifacts/retrain_v3/split.json")["class_names"]
         for architecture in b.ARCHITECTURES:
             for i, experiment in enumerate(b.experiment_plan()):
                 folder = out / architecture / experiment.name
                 folder.mkdir(parents=True)
                 if i in [0, len(b.experiment_plan()) - 1]:
-                    shutil.copy2(ROOT / "smoke_artifacts" / architecture / "00_baseline/best.pth",
+                    shutil.copy2(ROOT / "smoke_artifacts/retrain_v3" / architecture / "00_baseline/best.pth",
                                  folder / "best.pth")
                 # Synthetic scores select known paths; not benchmark results.
                 b.write_json(folder / "result.json", {
@@ -49,7 +49,7 @@ def main():
             result = b.final_evaluation(cfg, names, {"train_sha256": "synthetic-fixture"})
             assert len(result) == 4 and (result.samples == 200).all()
             assert (result.overlap_count == 1).all() and (result.clean_samples == 199).all()
-            assert Path("deployment/bird_model.pth").is_file()
+            assert (out / "deployment/bird_model.pth").is_file()
             again = b.final_evaluation(cfg, names, {"train_sha256": "synthetic-fixture"})
             assert result.equals(again)
             for run in result.run:

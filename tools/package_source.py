@@ -1,8 +1,11 @@
 """Build the assignment source ZIP without images, environments or weights."""
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
+import sys
 
 root = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(root))
+from birdlab import DEFAULT_OUTPUT_DIR
 output = root / "submission" / "COS30082_source.zip"
 output.parent.mkdir(exist_ok=True)
 files = [root / name for name in [
@@ -12,10 +15,8 @@ files = [root / name for name in [
     "train.txt", "test.txt",
 ]]
 files += sorted((root / "tools").glob("*.py"))
-files += sorted((root / "artifacts").rglob("*.csv"))
-files += sorted((root / "artifacts").rglob("*.png"))
-files += sorted((root / "artifacts").rglob("*.json"))
-files += sorted((root / "deployment").glob("*.json"))
+for suffix in ["*.csv", "*.png", "*.json"]:
+    files += sorted((root / DEFAULT_OUTPUT_DIR).rglob(suffix))
 with ZipFile(output, "w", ZIP_DEFLATED) as archive:
     for path in files:
         if path.is_file():

@@ -1,110 +1,70 @@
-"""Check fixed-photo previews, true Grad-CAM gradients and checkpoint panels.
-
-Run after verify_pipeline.py. All figures/scores are smoke-only artifacts.
-"""
+"""Verify new augmentation ranges, faithful previews and untouched RNG/source."""
 import hashlib
 import random
 import sys
 from pathlib import Path
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-
 import numpy as np
 import torch
 from PIL import Image
-from torch import nn
-
 import birdlab as b
-from bird_visuals import (attention_example, fixed_example, grad_cam,
-                          plot_attention_progress, preview_stage)
-
+from bird_visuals import fixed_example, preview_stage
 
 def main():
-    torch.set_num_threads(4)
-    # A known convolution/classifier should localize a known red square. Every
-    # parameter is frozen: explanations must still work via input gradients.
-    class ToyCNN(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.features = nn.Sequential(nn.Conv2d(3, 1, 1, bias=False), nn.ReLU())
-            self.classifier = nn.Linear(1, 2, bias=False)
-
-        def forward(self, x):
-            return self.classifier(self.features(x).mean(dim=(2, 3)))
-
-    toy = ToyCNN()
-    with torch.no_grad():
-        toy.features[0].weight.zero_()
-        toy.features[0].weight[0, 0] = 1
-        toy.classifier.weight.copy_(torch.tensor([[1.0], [-1.0]]))
-    for parameter in toy.parameters():
-        parameter.requires_grad_(False)
-    toy.features[0].eval()
-    modes = [module.training for module in toy.modules()]
-    pixels = np.zeros((8, 8, 3), dtype=np.uint8)
-    pixels[:4, :4, 0] = 255
-    example = Image.fromarray(pixels)
-    checkpoint = {"image_size": 8, "mean": [0, 0, 0], "std": [1, 1, 1],
-                  "class_names": ["red", "negative red"]}
-    cam, _, metadata = grad_cam(toy, checkpoint, example, 0)
-    assert cam[:4, :4].mean() > 0.99 and cam[4:, 4:].max() == 0
-    assert metadata["positive_map_present"]
-    assert [module.training for module in toy.modules()] == modes
-    assert not toy.features[-1]._forward_hooks
-    cam, _, metadata = grad_cam(toy, checkpoint, example, 1)
-    assert not cam.any() and not metadata["positive_map_present"]
-
-    cfg = b.Config(data_root=str(ROOT), output_dir=str(ROOT / "smoke_artifacts"))
+    cfg = b.Config(data_root=str(ROOT), output_dir=str(ROOT / "smoke_artifacts/retrain_v3"))
     manifest = b.read_json(Path(cfg.output_dir) / "split.json")
     train = b.read_annotations(ROOT, "train")
-    validation = train[train.filename.isin(manifest["validation"])].reset_index(drop=True)
-    path, target_class = fixed_example(cfg, validation)
-    assert fixed_example(cfg, validation) == (path, target_class)
+    val = train[train.filename.isin(manifest["validation"])].reset_index(drop=True)
+    path, label = fixed_example(cfg, val)
+    assert fixed_example(cfg, val) == (path, label)
     original_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-    for stage_index in range(len(b.experiment_plan())):
-        python_state, numpy_state, torch_state = random.getstate(), np.random.get_state(), torch.get_rng_state()
-        files = preview_stage(stage_index, path, cfg)
-        assert all(file.is_file() for file in files)
-        assert python_state == random.getstate()
-        after_numpy = np.random.get_state()
-        assert numpy_state[0] == after_numpy[0] and np.array_equal(numpy_state[1], after_numpy[1])
-        assert numpy_state[2:] == after_numpy[2:] and torch.equal(torch_state, torch.get_rng_state())
-    samples = b.read_json(Path(cfg.output_dir) / "visualizations/method_previews/02_random_crop_samples.json")["examples"]
-    assert len(samples) == 5
-    boxes = {(row["top"], row["left"], row["height"], row["width"]) for row in samples}
-    assert len(boxes) > 1
+    for index in range(len(b.experiment_plan())):
+        py, np_state, cpu = random.getstate(), np.random.get_state(), torch.get_rng_state()
+        files = preview_stage(index, path, cfg)
+        pixels = b.stage_configuration(index, cfg)["Changes pixels"].all()
+        assert len(files) == (2 if pixels else 0)
+        assert all(p.is_file() for p in files)
+        assert py == random.getstate() and torch.equal(cpu, torch.get_rng_state())
+        after = np.random.get_state()
+        assert np_state[0] == after[0] and np.array_equal(np_state[1], after[1]) and np_state[2:] == after[2:]
+    folder = Path(cfg.output_dir) / "visualizations/method_previews"
+    def examples(name):
+        return b.read_json(folder / f"{name}_samples.json")["examples"]
+    crops = examples("02_random_crop")
+    areas = [r["area_fraction"] for r in crops]
+    assert len(areas) == 5 and all(x < y for x, y in zip(areas, areas[1:]))
+    assert min(areas) >= .395 and max(areas) <= 1 and max(areas) - min(areas) > .35
+    assert len({(r["top"], r["left"]) for r in crops}) == 5
     with Image.open(path) as image:
-        for top, left, height, width in boxes:
-            assert 0 <= top < top + height <= image.height + 1e-6
-            assert 0 <= left < left + width <= image.width + 1e-6
-        # More than five possible runtime crops from a single original.
+        for row in crops:
+            assert 0 <= row["top"] < row["top"] + row["height"] <= image.height + 1e-6
+            assert 0 <= row["left"] < row["left"] + row["width"] <= image.width + 1e-6
         transform = b.make_transform(b.experiment_plan()[2])
-        variants = {hashlib.sha256(transform(image.convert("RGB")).numpy().tobytes()).hexdigest()
-                    for _ in range(20)}
+        variants = {hashlib.sha256(transform(image.convert("RGB")).numpy().tobytes()).hexdigest() for _ in range(20)}
         assert len(variants) > 5
+    angles = [r["angle_degrees"] for r in examples("05_random_rotation")]
+    assert all(-45 <= a <= 45 for a in angles) and max(angles) - min(angles) > 50
+    assert all(x < y for x, y in zip(angles, angles[1:]))
+    effects = examples("07_color_effects")
+    assert tuple(r["effect"] for r in effects) == b.COLOR_EFFECT_NAMES
+    assert all(.2 <= r["strength"] <= .45 for r in effects)
+    for name in ["03_horizontal_flip", "04_vertical_flip", "12_grayscale"]:
+        assert len(examples(name)) == 1
+    pixels = np.full((8, 8, 3), [40, 80, 120], dtype=np.uint8)
+    image = Image.fromarray(pixels)
+    assert np.array_equal(np.array(b.apply_color_effect(image, "invert")), 255 - pixels)
+    for effect, channel in [("red", 0), ("green", 1), ("blue", 2)]:
+        tinted = np.array(b.apply_color_effect(image, effect, .4)).astype(float)
+        expected = .6 * pixels.astype(float)
+        expected[:, :, channel] += .4 * 255
+        assert np.max(np.abs(tinted - expected)) <= 1
     assert hashlib.sha256(path.read_bytes()).hexdigest() == original_hash
-
-    for architecture in b.ARCHITECTURES:
-        weight = Path(cfg.output_dir) / architecture / "00_baseline/best.pth"
-        png, metadata = attention_example(weight, path, target_class, cfg.output_dir)
-        stamp = png.stat().st_mtime_ns
-        again, cached = attention_example(weight, path, target_class, cfg.output_dir)
-        assert again == png and cached == metadata and png.stat().st_mtime_ns == stamp
-        assert metadata["target_class"] == target_class
-    panel = plot_attention_progress(cfg, path, target_class, range(5))
-    assert panel.is_file()
-    assert not (Path(cfg.output_dir) / b.ARCHITECTURES[0] / "03_horizontal_flip/result.json").exists()
     b.write_json(Path(cfg.output_dir) / "visual_verification.json", {
-        "purpose": "Smoke-only checks, not assignment accuracy",
-        "gradcam_known_localization": True, "zero_positive_map_handled": True,
-        "frozen_parameters_supported": True, "previews_preserve_rng": True,
-        "runtime_crop_variants": len(variants), "target_class_fixed": target_class,
-        "cached_explanations": True, "missing_stages_not_fabricated": True,
-    })
-    print("Visual checks PASS: real gradients, same photo/class, RNG restoration, >5 crops, cached panels.")
-    print("Panel:", panel)
-
+        "purpose": "Smoke-only, not model accuracy", "crop_areas": areas,
+        "rotation_angles": angles, "color_effects": list(b.COLOR_EFFECT_NAMES),
+        "source_and_rng_preserved": True, "non_pixel_methods_have_no_images": True})
+    print("PASS: distinct crops/angles, both flip directions, actual RGB effects, source/RNG preserved.")
 
 if __name__ == "__main__":
     main()

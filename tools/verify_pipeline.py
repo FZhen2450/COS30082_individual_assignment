@@ -37,8 +37,8 @@ def main():
     scores, matrix, recalls, _ = birdlab.metrics_from_predictions([0, 0, 1, 2], [0, 1, 1, 1], 3)
     assert scores["top1"] == 0.5 and np.isclose(scores["average_per_class"], 0.5)
     assert matrix.shape == (3, 3)
-    cfg = birdlab.Config(data_root=str(ROOT), output_dir="smoke_artifacts",
-                         epochs=2, head_epochs=1, batch_size=8, accumulation_steps=2)
+    cfg = birdlab.Config(data_root=str(ROOT), output_dir="smoke_artifacts/retrain_v3",
+                         image_size=96, epochs=2, head_epochs=1, batch_size=2, accumulation_steps=2)
     fit, val, names, manifest = birdlab.prepare_data(cfg)
     assert len(names) == 200 and not set(fit.sha256) & set(val.sha256)
     print("Split:", len(fit), len(val), "duplicate rows:", len(manifest["duplicate_training_rows"]), flush=True)
@@ -117,8 +117,9 @@ def main():
         expected = 100 * (rows.loc[plan[1].name, "val_top1"] - rows.loc[plan[0].name, "val_top1"])
         assert np.isclose(rows.loc[plan[1].name, "delta_vs_previous_pp"], expected)
         assert np.isnan(rows.loc[plan[-1].name, "delta_vs_previous_pp"])
-    birdlab.plot_results(cfg.output_dir)
-    birdlab.plot_history(str(Path(cfg.output_dir) / birdlab.ARCHITECTURES[0] / "00_baseline/best.pth"))
+    comparison = birdlab.comparison_table(cfg.output_dir)
+    assert len(comparison) == 4
+    assert any("Val Top-1 (%)" in key for key in comparison.columns)
     birdlab.write_json(Path(cfg.output_dir) / "verification.json", {
         "purpose": "Tiny pipeline smoke test; not benchmark results",
         "torch": torch.__version__, "gpu": torch.cuda.get_device_name(0),

@@ -8,6 +8,7 @@ Test/
 __pycache__/
 .ipynb_checkpoints/
 artifacts/
+artifacts_retrain_v3/
 smoke_artifacts/
 deployment/*.pth
 *.tmp

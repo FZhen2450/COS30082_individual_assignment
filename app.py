@@ -1,108 +1,82 @@
-"""Streamlit model demonstration. Run: python -m streamlit run app.py."""
+"""Streamlit demo for the fresh retraining study; result comparisons use tables."""
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
-from birdlab import history_table, load_predictor, predict_image
+from birdlab import DEFAULT_OUTPUT_DIR, comparison_table, history_table, load_predictor, predict_image
 
 ROOT = Path(__file__).resolve().parent
+STUDY = ROOT / DEFAULT_OUTPUT_DIR
 st.set_page_config(page_title="CUB-200 Bird Classifier", page_icon="🐦", layout="wide")
 st.title("🐦 Bird Species Classification")
-st.caption("COS30082 · MobileNetV1 / EfficientNetV2-S · 200 bird species")
+st.caption("MobileNetV1 / EfficientNetV2-S · fresh retraining study · 200 species")
 
 
 @st.cache_resource(max_entries=2)
 def cached_model(path, modified_ns):
-    # CPU inference leaves the laptop GPU available for training. Building with
-    # pretrained=False means deployment never downloads ImageNet weights.
     return load_predictor(path, "cpu")
 
 
-choices = sorted((ROOT / "deployment").glob("*.pth"))
-choices += sorted((ROOT / "artifacts").glob("*/*/best.pth"))
-tab_predict, tab_experiments, tab_visuals = st.tabs(["Test an image", "Experiment comparison", "Stage visuals"])
+choices = sorted((STUDY / "deployment").glob("*.pth"))
+choices += sorted(STUDY.glob("*/*/best.pth"))
+tab_predict, tab_tables, tab_previews = st.tabs(["Test an image", "Comparison tables", "Augmentation examples"])
 with tab_predict:
     if not choices:
-        st.info("Train the notebook first. Its final evaluation exports deployment/bird_model.pth.")
-        st.write("Local run: `.venv\\Scripts\\python.exe -m streamlit run app.py`")
+        st.info("The new study has no trained checkpoint yet. Run Stage 0 in the revised notebook.")
     else:
-        checkpoint_path = st.selectbox("Model checkpoint", choices,
-                                       format_func=lambda p: str(p.relative_to(ROOT)))
-        model, checkpoint = cached_model(str(checkpoint_path), checkpoint_path.stat().st_mtime_ns)
-        st.write(f"**Architecture:** {checkpoint['architecture']} · "
-                 f"**Experiment:** {checkpoint['experiment']['name']} · "
-                 f"**Validation accuracy:** {checkpoint['val_metrics']['top1']:.2%}")
-        uploaded = st.file_uploader("Upload a bird photo", type=["jpg", "jpeg", "png", "webp"])
-        if uploaded is not None:
+        path = st.selectbox("Model checkpoint", choices, format_func=lambda p: str(p.relative_to(STUDY)))
+        model, metadata = cached_model(str(path), path.stat().st_mtime_ns)
+        st.write(f"**Model:** {metadata['architecture']} · **Stage:** {metadata['experiment']['name']} · "
+                 f"**Val Top-1 Accuracy:** {metadata['val_metrics']['top1']:.2%}")
+        upload = st.file_uploader("Upload a bird photo", type=["jpg", "jpeg", "png", "webp"])
+        if upload:
             try:
-                image = Image.open(uploaded)
+                image = Image.open(upload)
                 image.load()
                 left, right = st.columns(2)
-                left.image(image, caption=uploaded.name, width="stretch")
-                predictions = predict_image(model, checkpoint, image)
-                right.metric("Predicted species", predictions.iloc[0].species)
-                right.dataframe(predictions.assign(
-                    probability=predictions.probability.map(lambda p: f"{p:.2%}")),
-                    hide_index=True, width="stretch")
-                right.bar_chart(predictions.set_index("species"))
-                st.caption("Scores are model probabilities, not calibrated certainty. "
-                           "This classifier always chooses among its 200 species, even for non-bird images.")
+                left.image(image, caption=upload.name, width="stretch")
+                result = predict_image(model, metadata, image)
+                right.metric("Predicted species", result.iloc[0].species)
+                right.dataframe(result.assign(probability=result.probability.map(lambda p: f"{p:.2%}")),
+                                hide_index=True, width="stretch")
+                st.caption("Probabilities for one image are not dataset accuracy. The model always picks among its 200 species.")
             except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
                 st.error(f"Cannot read this image: {error}")
 
-with tab_experiments:
-    comparison = ROOT / "artifacts/comparison.csv"
-    if comparison.exists():
-        frame = pd.read_csv(comparison)
-        view = frame[["architecture", "experiment", "val_top1", "val_average_per_class",
-                      "delta_vs_baseline_pp", "delta_vs_previous_pp", "gap", "best_epoch"]].copy()
-        for column in ["val_top1", "val_average_per_class", "gap"]:
-            view[column] *= 100
-        st.write("Paired cumulative stages: validation results (%) and changes (percentage points)")
-        st.dataframe(view.round(3), hide_index=True, width="stretch")
-        st.bar_chart(frame.pivot(index="experiment", columns="architecture", values="val_top1") * 100)
-        st.bar_chart(frame.pivot(index="experiment", columns="architecture", values="delta_vs_baseline_pp"))
-        st.write("Change from the previous recipe (pp); negative values are retained")
-        st.bar_chart(frame.pivot(index="experiment", columns="architecture", values="delta_vs_previous_pp"))
-        st.download_button("Download experiment results", comparison.read_bytes(),
-                           "comparison.csv", "text/csv")
-        run = st.selectbox("Learning curves", frame.checkpoint.tolist())
-        history_path = ROOT / Path(run).parent / "history.csv"
-        if history_path.exists():
-            history = pd.read_csv(history_path).set_index("epoch")
-            st.write("Train Accuracy / Val Accuracy (Top-1, %)")
-            st.line_chart((history[["train_top1", "val_top1", "fit_eval_top1"]] * 100).rename(columns={
-                "train_top1": "Train Accuracy", "val_top1": "Val Accuracy",
-                "fit_eval_top1": "Train Eval Accuracy"}))
-            st.write("Train Loss / Val Loss (unsmoothed cross entropy)")
-            st.line_chart(history[["train_loss", "val_loss"]].rename(columns={
-                "train_loss": "Train Loss", "val_loss": "Val Loss"}))
-            st.caption("Train Accuracy uses actual training batches. Train Eval Accuracy uses "
-                       "unaugmented training images with dropout off; the gap uses this clean evaluation.")
-            st.dataframe(history_table(ROOT / Path(run)).round(4), hide_index=True, width="stretch")
+with tab_tables:
+    table = comparison_table(STUDY)
+    if table.empty:
+        st.info("Paired comparison tables appear after the new baseline finishes. Old-study results are not mixed in.")
     else:
-        st.info("Comparison charts will appear after experiments finish. No results are fabricated.")
-    summary = ROOT / "artifacts/test_summary.csv"
-    if summary.exists():
-        st.write("Final test results (fractions from 0 to 1)")
-        st.dataframe(pd.read_csv(summary), hide_index=True, width="stretch")
-        st.caption("Model selection uses validation only. Clean metrics exclude byte-identical Train/Test overlap.")
+        st.write("Validation accuracy (%) and improvements (percentage points)")
+        st.dataframe(table, width="stretch")
+        st.caption("Each stage keeps earlier settings. Negative changes are shown; stronger augmentation is not guaranteed to help.")
+        csv = STUDY / "comparison_display.csv"
+        st.download_button("Download comparison table", csv.read_bytes(), "comparison_display.csv", "text/csv")
+        histories = sorted(STUDY.glob("*/*/history.csv"))
+        selected = st.selectbox("Per-epoch training metrics", histories,
+                                format_func=lambda p: str(p.parent.relative_to(STUDY)))
+        st.dataframe(history_table(selected.parent / "best.pth").round(4), hide_index=True, width="stretch")
+        st.caption("Train Accuracy uses actual training batches. Train Eval Accuracy disables random augmentation and dropout.")
+    test = STUDY / "test_summary.csv"
+    if test.exists():
+        metrics = pd.read_csv(test)
+        names = {"top1": "Test Top-1 Accuracy (%)", "average_per_class": "Test Avg/Class Accuracy (%)",
+                 "clean_top1": "Clean Test Top-1 (%)", "clean_average_per_class": "Clean Test Avg/Class (%)"}
+        for column in names:
+            metrics[column] *= 100
+        st.write("Final Test results (model selection used validation only)")
+        st.dataframe(metrics.rename(columns=names).round(3), hide_index=True, width="stretch")
 
-with tab_visuals:
-    st.write("The same validation photo across methods and checkpoints")
-    st.caption("Five augmentation examples illustrate stochastic transforms; training keeps sampling new ones. "
-               "Grad-CAM explains model attention. It is not a thermal measurement or an accuracy score.")
-    previews = sorted((ROOT / "artifacts/visualizations/method_previews").glob("*.png"))
+with tab_previews:
+    st.write("Image augmentations, not model-comparison pictures")
+    st.caption("Crop/rotation/colour examples are selected for visible differences. Runtime training remains random. "
+               "Fine-tuning and regularization do not alter input pixels and have no artificial image preview.")
+    previews = sorted((STUDY / "visualizations/method_previews").glob("*.png"))
     if previews:
-        preview = st.selectbox("Augmentation or setting preview", previews,
-                               format_func=lambda path: path.stem)
-        st.image(str(preview), width="stretch")
-    panels = sorted((ROOT / "artifacts/visualizations/attention_progress").glob("*.png"))
-    if panels:
-        panel = st.selectbox("Attention across training stages", panels,
-                             format_func=lambda path: path.stem)
-        st.image(str(panel), width="stretch")
-    if not previews and not panels:
-        st.info("Run the stage preview and Grad-CAM cells in the notebook to generate these comparisons.")
+        image_path = st.selectbox("Augmentation method", previews, format_func=lambda p: p.stem)
+        st.image(str(image_path), width="stretch")
+    else:
+        st.info("Run an image-augmentation preview cell in the new notebook to generate examples.")
