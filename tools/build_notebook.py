@@ -88,6 +88,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
 from IPython.display import display, Image as DisplayImage
+# Reload local modules before binding their functions: an existing notebook
+# kernel may still hold a version imported before these files were updated.
+import importlib
+import birdlab
+importlib.invalidate_caches()
+importlib.reload(birdlab)
+import bird_visuals
+importlib.reload(bird_visuals)
 from birdlab import (
     ARCHITECTURES, Config, experiment_plan, prepare_data, normalization,
     make_transform, seed_everything, train_stage, results_table,

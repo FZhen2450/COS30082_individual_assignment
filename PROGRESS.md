@@ -52,6 +52,9 @@ Verified locally on 2026-10-21:
   validation example/class, unchanged source image and restored preview RNG states.
 - Checked Grad-CAM against a known red-square CNN, including frozen parameters,
   empty positive maps, hook cleanup and restoration of model train/eval modes.
+- Fixed stale-kernel ImportError for normalization by explicitly reloading both
+  local modules before the notebook binds imported functions; the notebook
+  builder includes the same fix.
 - Rendered and inspected the crop examples and real-checkpoint attention panel;
   completed stages have real explanations and missing stages remain blank.
 - Verified the 3,863 / 966 split retains all 200 classes with no identical content
