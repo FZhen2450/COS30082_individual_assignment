@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
-from birdlab import load_predictor, predict_image
+from birdlab import history_table, load_predictor, predict_image
 
 ROOT = Path(__file__).resolve().parent
 st.set_page_config(page_title="CUB-200 Bird Classifier", page_icon="🐦", layout="wide")
@@ -72,8 +72,16 @@ with tab_experiments:
         history_path = ROOT / Path(run).parent / "history.csv"
         if history_path.exists():
             history = pd.read_csv(history_path).set_index("epoch")
-            st.line_chart(history[["fit_eval_top1", "val_top1"]] * 100)
-            st.line_chart(history[["fit_eval_loss", "val_loss"]])
+            st.write("Train Accuracy / Val Accuracy (Top-1, %)")
+            st.line_chart((history[["train_top1", "val_top1", "fit_eval_top1"]] * 100).rename(columns={
+                "train_top1": "Train Accuracy", "val_top1": "Val Accuracy",
+                "fit_eval_top1": "Train Eval Accuracy"}))
+            st.write("Train Loss / Val Loss (unsmoothed cross entropy)")
+            st.line_chart(history[["train_loss", "val_loss"]].rename(columns={
+                "train_loss": "Train Loss", "val_loss": "Val Loss"}))
+            st.caption("Train Accuracy uses actual training batches. Train Eval Accuracy uses "
+                       "unaugmented training images with dropout off; the gap uses this clean evaluation.")
+            st.dataframe(history_table(ROOT / Path(run)).round(4), hide_index=True, width="stretch")
     else:
         st.info("Comparison charts will appear after experiments finish. No results are fabricated.")
     summary = ROOT / "artifacts/test_summary.csv"

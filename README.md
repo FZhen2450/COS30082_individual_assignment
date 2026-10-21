@@ -99,6 +99,14 @@ continuation from the last finished epoch, including optimizer/scaler/RNG state.
 Interrupted partially completed epochs are replayed. Completed experiments skip.
 Checkpoints are local project artifacts; load only ones you trust.
 
+Each epoch explicitly logs Train Loss, Train Accuracy (Top-1), Val Loss and
+Val Accuracy (Top-1), plus validation average accuracy per class, best validation
+accuracy and the clean train-eval generalization gap. Each stage shows an epoch
+table and conventional train/validation curves. `history_table(checkpoint_path)`
+and `plot_history(checkpoint_path)` read existing CSVs without retraining.
+Loss plots use unsmoothed cross entropy; the label-smoothed optimization objective
+is stored separately as `train_objective`. Required final metrics use Test data.
+
 ## Streamlit
 
 ```powershell

@@ -22,6 +22,12 @@ PDF 本身没有规定必须先训练出很差的模型。你的老师补充的 
 
 例如 accuracy 从 70% 到 75%，提升是 **5 个百分点（pp）**。程序自动计算相对 baseline 的正负变化。
 
+训练日志每个 epoch 明确显示 **Train Loss、Train Accuracy (Top-1)、Val Loss、Val Accuracy (Top-1)**，并附上 Val Average Accuracy per Class、Best Val Accuracy、Train Eval Accuracy 和泛化差距（pp）。每个阶段之后都有两模型各自的完整 epoch 表格和曲线；已完成的训练可从 `history.csv` 重新展示，不需要重训。
+
+Train Accuracy 来自训练过程中实际使用的 batch（可能带增强和 dropout）；Train Eval Accuracy 则是关闭随机增强和 dropout 后重新评估训练集的准确率。Gap 使用后者减去 Val Accuracy，不能把这两种训练集准确率混为一谈。Train/Val Loss 图统一画未平滑的交叉熵，label smoothing 的实际优化目标另存为 `train_objective`。
+
+报告中两项必需指标最终要在保留的 Test 集上报告；训练时的 Train/Val Accuracy 用于展示学习过程、选模型和分析过拟合，不能代替最终 Test 结果。
+
 ## 本次采用的两个架构
 
 - **MobileNetV1（width multiplier=1.0）**：使用 depthwise + pointwise 卷积、global average pooling 和 200 类线性分类头，作为结构简单的第一个模型。

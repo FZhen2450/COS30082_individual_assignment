@@ -99,7 +99,7 @@ importlib.reload(bird_visuals)
 from birdlab import (
     ARCHITECTURES, Config, experiment_plan, prepare_data, normalization,
     make_transform, seed_everything, train_stage, results_table,
-    paired_comparison, plot_results, plot_history, final_evaluation,
+    paired_comparison, plot_results, plot_history, history_table, final_evaluation,
     load_predictor, predict_image,
 )
 from bird_visuals import fixed_example, preview_stage, plot_attention_progress
@@ -201,9 +201,11 @@ attention_path = plot_attention_progress(
     cfg, example_image_path, example_class, stage_indices=range({first}, {last}))
 display(DisplayImage(filename=str(attention_path)))
 ''')
-    if index == 0:
-        code('''
+    code('''
+# Standard per-epoch accuracy/loss from CSV, including already completed runs.
 for checkpoint in stage_results.checkpoint:
+    print(Path(checkpoint).parent.parent.name, Path(checkpoint).parent.name)
+    display(history_table(checkpoint).round(4))
     plot_history(checkpoint)
 ''')
 

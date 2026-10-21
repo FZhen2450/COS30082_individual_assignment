@@ -366,6 +366,21 @@ def save_checkpoint(path, payload):
     temporary.replace(path)
 
 
+def format_epoch_metrics(architecture, experiment_name, row, best, epochs):
+    """Keep actual training accuracy distinct from clean train-eval accuracy."""
+    return (
+        f"[{architecture}/{experiment_name}] Epoch {row['epoch']}/{epochs} ({row['phase']})\n"
+        f"Train Loss (CE): {row['train_loss']:.4f} | "
+        f"Train Accuracy (Top-1): {row['train_top1']:.2%} | "
+        f"Val Loss (CE): {row['val_loss']:.4f} | "
+        f"Val Accuracy (Top-1): {row['val_top1']:.2%}\n"
+        f"Val Average Accuracy per Class: {row['val_average_per_class']:.2%} | "
+        f"Best Val Accuracy (Top-1): {best:.2%} | "
+        f"Train Eval Accuracy: {row['fit_eval_top1']:.2%} | "
+        f"Generalization Gap (Train Eval - Val): {100 * row['gap']:+.2f} pp"
+    )
+
+
 def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
     if architecture not in ARCHITECTURES:
         raise ValueError(architecture)
@@ -474,9 +489,7 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
                 "loader_rng": generator.get_state(),
                 "cuda_rng": torch.cuda.get_rng_state_all() if device.type == "cuda" else [],
             })
-            print(f"{architecture}/{exp.name} {epoch + 1}/{cfg.epochs} "
-                  f"fit={fit_metrics['top1']:.2%} val={val_metrics['top1']:.2%} "
-                  f"gap={row['gap']:.2%} best={best:.2%}", flush=True)
+            print(format_epoch_metrics(architecture, exp.name, row, best, cfg.epochs), flush=True)
         checkpoint = torch.load(folder / "best.pth", map_location="cpu", weights_only=True)
         chosen = next(row for row in history if row["epoch"] == checkpoint["epoch"])
         result = {"architecture": architecture, "experiment": exp.name,
@@ -572,22 +585,46 @@ def plot_results(output_dir):
     plt.show()
 
 
+def history_table(checkpoint_path):
+    """Readable epoch metrics from existing CSVs; no training is performed."""
+    history = pd.read_csv(Path(checkpoint_path).parent / "history.csv")
+    return pd.DataFrame({
+        "Epoch": history.epoch,
+        "Train Loss (CE)": history.train_loss,
+        "Train Accuracy (%)": history.train_top1 * 100,
+        "Val Loss (CE)": history.val_loss,
+        "Val Accuracy (%)": history.val_top1 * 100,
+        "Val Average Accuracy per Class (%)": history.val_average_per_class * 100,
+        "Best Val Accuracy (%)": history.val_top1.cummax() * 100,
+        "Train Eval Accuracy (%)": history.fit_eval_top1 * 100,
+        "Generalization Gap (pp)": history.gap * 100,
+    })
+
+
 def plot_history(checkpoint_path):
     history = pd.read_csv(Path(checkpoint_path).parent / "history.csv")
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    axes[0].plot(history.epoch, history.fit_eval_loss, label="Fit (eval)")
-    axes[0].plot(history.epoch, history.val_loss, label="Validation")
-    axes[0].set(title="Unsmoothed cross entropy", xlabel="Epoch")
-    axes[1].plot(history.epoch, history.fit_eval_top1 * 100, label="Fit (eval)")
-    axes[1].plot(history.epoch, history.val_top1 * 100, label="Validation")
-    axes[1].set(title="Accuracy (%)", xlabel="Epoch")
-    axes[2].plot(history.epoch, history.gap * 100)
-    axes[2].set(title="Fit - validation gap (pp)", xlabel="Epoch")
-    for ax in axes[:2]:
+    fig, grid = plt.subplots(2, 2, figsize=(13, 8))
+    axes = grid.flat
+    axes[0].plot(history.epoch, history.train_loss, label="Train Loss")
+    axes[0].plot(history.epoch, history.val_loss, label="Val Loss")
+    axes[0].set(title="Train Loss / Val Loss (unsmoothed CE)", xlabel="Epoch", ylabel="Loss")
+    axes[1].plot(history.epoch, history.train_top1 * 100, label="Train Accuracy")
+    axes[1].plot(history.epoch, history.val_top1 * 100, label="Val Accuracy")
+    axes[1].plot(history.epoch, history.fit_eval_top1 * 100, linestyle=":", label="Train Eval Accuracy")
+    axes[1].set(title="Train Accuracy / Val Accuracy (Top-1)", xlabel="Epoch", ylabel="Accuracy (%)")
+    axes[2].plot(history.epoch, history.val_average_per_class * 100, color="tab:green")
+    axes[2].set(title="Val Average Accuracy per Class", xlabel="Epoch", ylabel="Accuracy (%)")
+    axes[3].plot(history.epoch, history.gap * 100)
+    axes[3].axhline(0, color="black", linewidth=0.8)
+    axes[3].set(title="Generalization Gap: Train Eval - Val", xlabel="Epoch", ylabel="Gap (pp)")
+    for ax in (axes[0], axes[1]):
         ax.legend()
-    fig.tight_layout()
+    run = Path(checkpoint_path).parent
+    fig.suptitle(f"{run.parent.name} / {run.name}")
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
     fig.savefig(Path(checkpoint_path).parent / "learning_curves.png", dpi=160)
     plt.show()
+    return fig
 
 
 def load_predictor(checkpoint_path, device="cpu"):

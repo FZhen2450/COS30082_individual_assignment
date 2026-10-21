@@ -44,7 +44,7 @@ Verified locally on 2026-10-21:
 - Interrupted each tiny training run after an epoch checkpoint, resumed it, and
   verified completion of the next epoch with saved optimizer/scaler/RNG state.
 - Loaded each saved model for CPU inference and checked its Top-5 predictions.
-- Validated the notebook's 61 cells with preview, training/comparison and attention
+- Extended the notebook to 71 cells with explicit epoch metrics, preview, training/comparison and attention
   cells for each paired stage.
 - Checked one-setting-at-a-time recipe accumulation, previous-stage ordering,
   paired CSV output and changes from the immediately previous recipe.
@@ -80,8 +80,9 @@ scores must not be used in the report or deployed as a completed classifier.
 
 ## Remaining work for the assignment
 
-- Restart the notebook kernel to load the revised architecture and training plan.
-- Run all eleven paired cumulative stages in the overwritten notebook.
+- After the current stage finishes, rerun the notebook import cell to load the
+  updated metric display helpers.
+- Continue the remaining paired cumulative stages; completed runs are skipped.
 - Review actual learning curves and validation comparisons.
 - Run final evaluation and export the real trained deployment checkpoint.
 - Run the trained Streamlit application and demonstrate uploads, predictions and
@@ -91,6 +92,10 @@ scores must not be used in the report or deployed as a completed classifier.
   instructions to the report (plus an app URL if deployed online).
 - Rebuild the source ZIP after training to include the final results.
 
-No full training accuracy or final trained model is claimed at the implementation
-stage. The report should include the YouTube link and Streamlit run instructions;
+Training histories are now present for both architectures through the rotation
+stage; later-stage training was in progress during the 2026-10-22 display update.
+The display update keeps the existing training records and checkpoints and adds
+explicit Train/Val Accuracy and Loss to logs, tables, plots and Streamlit.
+Final Test accuracy is not claimed before the final evaluation is completed.
+The report should include the YouTube link and Streamlit run instructions;
 an online app link is optional if the application is deployed online.
