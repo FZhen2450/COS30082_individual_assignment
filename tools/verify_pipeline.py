@@ -87,7 +87,7 @@ def main():
         baseline_state = torch.load(folder / "last.pth", map_location="cpu", weights_only=True)
         assert torch.equal(baseline_state["model"][feature_key], initial_feature)
         del baseline_state
-        for recipe in [plan[1], plan[-1]]:
+        for recipe in [plan[1], plan[2], plan[-1]]:
             variant = birdlab.train_experiment(architecture, recipe, cfg,
                                                 small_fit, small_val, names, manifest)
             state = torch.load(Path(variant["checkpoint"]).parent / "last.pth",
@@ -109,6 +109,8 @@ def main():
         del model
     paired_stage = birdlab.train_stage(1, cfg, small_fit, small_val, names, manifest)
     assert len(paired_stage) == 2 and (paired_stage.experiment == plan[1].name).all()
+    crop_stage = birdlab.train_stage(2, cfg, small_fit, small_val, names, manifest)
+    assert len(crop_stage) == 2 and plan[2].crop and not plan[2].flip and not plan[2].rotation
     frame = birdlab.results_table(cfg.output_dir)
     for architecture in birdlab.ARCHITECTURES:
         rows = frame[frame.architecture == architecture].set_index("experiment")
@@ -122,7 +124,7 @@ def main():
         "torch": torch.__version__, "gpu": torch.cuda.get_device_name(0),
         "fit_count": len(fit), "validation_count": len(val), "models": results,
         "smoke_fit_count": len(small_fit), "smoke_validation_count": len(small_val),
-        "recipes_checked": [plan[0].name, plan[1].name, plan[-1].name]})
+        "recipes_checked": [plan[0].name, plan[1].name, plan[2].name, plan[-1].name]})
     print("All pipeline checks passed. Full experiments have NOT been run.", flush=True)
 
 

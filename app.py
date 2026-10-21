@@ -22,7 +22,7 @@ def cached_model(path, modified_ns):
 
 choices = sorted((ROOT / "deployment").glob("*.pth"))
 choices += sorted((ROOT / "artifacts").glob("*/*/best.pth"))
-tab_predict, tab_experiments = st.tabs(["Test an image", "Experiment comparison"])
+tab_predict, tab_experiments, tab_visuals = st.tabs(["Test an image", "Experiment comparison", "Stage visuals"])
 with tab_predict:
     if not choices:
         st.info("Train the notebook first. Its final evaluation exports deployment/bird_model.pth.")
@@ -81,3 +81,20 @@ with tab_experiments:
         st.write("Final test results (fractions from 0 to 1)")
         st.dataframe(pd.read_csv(summary), hide_index=True, width="stretch")
         st.caption("Model selection uses validation only. Clean metrics exclude byte-identical Train/Test overlap.")
+
+with tab_visuals:
+    st.write("The same validation photo across methods and checkpoints")
+    st.caption("Five augmentation examples illustrate stochastic transforms; training keeps sampling new ones. "
+               "Grad-CAM explains model attention. It is not a thermal measurement or an accuracy score.")
+    previews = sorted((ROOT / "artifacts/visualizations/method_previews").glob("*.png"))
+    if previews:
+        preview = st.selectbox("Augmentation or setting preview", previews,
+                               format_func=lambda path: path.stem)
+        st.image(str(preview), width="stretch")
+    panels = sorted((ROOT / "artifacts/visualizations/attention_progress").glob("*.png"))
+    if panels:
+        panel = st.selectbox("Attention across training stages", panels,
+                             format_func=lambda path: path.stem)
+        st.image(str(panel), width="stretch")
+    if not previews and not panels:
+        st.info("Run the stage preview and Grad-CAM cells in the notebook to generate these comparisons.")

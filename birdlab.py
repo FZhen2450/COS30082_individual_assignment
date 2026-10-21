@@ -30,6 +30,7 @@ from tqdm.auto import tqdm
 
 ARCHITECTURES = ("mobilenet_v1", "efficientnet_v2_s")
 MOBILENET_V1_SOURCE = "mobilenetv1_100.ra4_e3600_r224_in1k"
+PIPELINE_VERSION = "paired_methods_resize_crop_v2"
 MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 
@@ -80,7 +81,9 @@ class Config:
 class Experiment:
     name: str
     fine_tune: bool = False
-    geometry: bool = False
+    crop: bool = False
+    flip: bool = False
+    rotation: bool = False
     color: bool = False
     grayscale: bool = False
     dropout: float = 0.0
@@ -95,13 +98,15 @@ def experiment_plan():
     plan = [Experiment("00_baseline")]
     for name, change in [
         ("01_fine_tune", {"fine_tune": True}),
-        ("02_geometry", {"geometry": True}),
-        ("03_color", {"color": True}),
-        ("04_dropout", {"dropout": 0.3}),
-        ("05_weight_decay", {"weight_decay": 1e-3}),
-        ("06_label_smoothing", {"label_smoothing": 0.1}),
-        ("07_erasing", {"erasing": True}),
-        ("08_grayscale", {"grayscale": True}),
+        ("02_random_crop", {"crop": True}),
+        ("03_horizontal_flip", {"flip": True}),
+        ("04_rotation", {"rotation": True}),
+        ("05_color", {"color": True}),
+        ("06_dropout", {"dropout": 0.3}),
+        ("07_weight_decay", {"weight_decay": 1e-3}),
+        ("08_label_smoothing", {"label_smoothing": 0.1}),
+        ("09_erasing", {"erasing": True}),
+        ("10_grayscale", {"grayscale": True}),
     ]:
         plan.append(replace(plan[-1], name=name, **change))
     return plan
@@ -189,12 +194,15 @@ def normalization(architecture):
 
 def make_transform(exp=None, size=224, mean=MEAN, std=STD):
     # Evaluation and deployment use exactly the same deterministic transform.
-    steps = []
-    if exp and exp.geometry:
-        steps += [T.RandomResizedCrop(size, scale=(0.75, 1.0), ratio=(0.85, 1.15)),
-                  T.RandomHorizontalFlip(), T.RandomRotation(10)]
-    else:
-        steps += [T.Resize((size, size))]
+    # Crop AFTER the common resize: extreme aspect ratios otherwise make the
+    # area/ratio constraints impossible and silently fall back to a fixed crop.
+    steps = [T.Resize((size, size))]
+    if exp and exp.crop:
+        steps += [T.RandomResizedCrop(size, scale=(0.75, 1.0), ratio=(0.85, 1.15))]
+    if exp and exp.flip:
+        steps += [T.RandomHorizontalFlip()]
+    if exp and exp.rotation:
+        steps += [T.RandomRotation(10)]
     if exp and exp.color:
         steps += [T.ColorJitter(brightness=0.15, contrast=0.15,
                                saturation=0.15, hue=0.02)]
@@ -367,7 +375,8 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
         raise ValueError("Use accumulation_steps >= 1 and num_workers=0 for reproducible notebook resume")
     folder = Path(cfg.output_dir) / architecture / exp.name
     folder.mkdir(parents=True, exist_ok=True)
-    run_spec = {"config": asdict(cfg), "experiment": asdict(exp),
+    run_spec = {"pipeline_version": PIPELINE_VERSION,
+                "config": asdict(cfg), "experiment": asdict(exp),
                 "architecture": architecture, "dataset": manifest["train_sha256"]}
     spec_path = folder / "run.json"
     if spec_path.exists() and read_json(spec_path) != run_spec:
@@ -449,6 +458,7 @@ def train_experiment(architecture, exp, cfg, fit, val, names, manifest):
                     "mean": list(normalization(architecture)[0]),
                     "std": list(normalization(architecture)[1]), "epoch": epoch + 1,
                     "val_metrics": val_metrics, "train_fingerprint": manifest["train_sha256"],
+                    "pipeline_version": PIPELINE_VERSION,
                 })
             elif epoch >= cfg.head_epochs:
                 stale += 1

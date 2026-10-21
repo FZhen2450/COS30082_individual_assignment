@@ -75,11 +75,11 @@ The loaders and saved deployment metadata preserve each normalization.
 
 Stage 0 trains only the linear classifier for the whole run, with a frozen
 backbone. Stage 1 adds backbone fine-tuning after 2 head-only warm-up epochs.
-Stages 2-8 keep fine-tuning and cumulatively add one setting at a time.
+Stages 2-10 keep fine-tuning and cumulatively add one setting at a time.
 The seed, split, resolution, epoch budget, scheduler and BatchNorm policy stay
 fixed. Early stopping and checkpoint selection use validation only.
 
-18 runs total: 9 recipes x 2 architectures. Full training may take hours.
+22 runs total: 11 recipes x 2 architectures. Full training may take hours.
 On OOM, restart the kernel, use batch 4 / accumulation 8, and use a new study
 directory if any run has already been saved with different settings.
 ''')
@@ -87,13 +87,14 @@ code('''
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image
-from IPython.display import display
+from IPython.display import display, Image as DisplayImage
 from birdlab import (
     ARCHITECTURES, Config, experiment_plan, prepare_data, normalization,
     make_transform, seed_everything, train_stage, results_table,
     paired_comparison, plot_results, plot_history, final_evaluation,
     load_predictor, predict_image,
 )
+from bird_visuals import fixed_example, preview_stage, plot_attention_progress
 cfg = Config(
     data_root=str(ROOT), output_dir="artifacts", seed=42,
     image_size=224, batch_size=8, accumulation_steps=4, num_workers=0,
@@ -123,35 +124,44 @@ counts.plot(figsize=(12, 3), xlabel="Class ID", ylabel="Images", title="Fit / va
 plt.show()
 ''')
 md('''
-## 4. Preview cumulative training augmentation
+## 4. Pin ONE validation photo for every method and attention comparison
 
-Geometry uses mild crop/zoom, flip and rotation, not arbitrary body distortion.
-ColorJitter is mild because feather colors identify species. Stage 7 adds random
-erasing; stage 8 additionally tests grayscale (20% probability).
-Grayscale is NOT infrared or thermal imaging. It may reduce accuracy.
-Validation, Test and Streamlit use deterministic preprocessing without augmentation.
+Crop, horizontal flip and rotation are separate stages, so the crop effect is
+not confounded with two other new methods. Before each training stage, inspect
+the new method on the SAME photo: original + 5 examples. Training is NOT limited
+to those five: a random transformation is resampled each time an image is loaded.
+The original dataset is not duplicated on disk or changed.
+
+The second preview row shows five draws from the FULL cumulative recipe.
+Grayscale/erasing effects are forced only in the isolated method illustrations;
+full-recipe previews and training keep their real application probabilities.
+Non-image methods (fine-tuning, dropout, weight decay, label smoothing) show an
+explanation, not a fictional input-image transformation.
+
+After each paired training cell, inspect the same photo's Grad-CAM for both
+models across up to five stages. Target the same TRUE species each time, even
+if predictions change. These heatmaps explain class-related regions, not physical
+temperature. Grad-CAM does not train weights or increase accuracy by itself.
+Untrained stages stay blank. Colors are normalized per map; a visually attractive
+heatmap is not evidence of better accuracy. See https://arxiv.org/abs/1610.02391.
+Validation, Test and Streamlit always classify deterministic, unaugmented inputs.
 ''')
 code('''
-seed_everything(cfg.seed)
-mean, std = normalization(ARCHITECTURES[0])
-with Image.open(fit_df.iloc[0].path) as image:
-    source = image.convert("RGB")
-fig, axes = plt.subplots(1, 5, figsize=(16, 4))
-for ax, index in zip(axes, [0, 2, 3, 7, 8]):
-    tensor = make_transform(plan[index], cfg.image_size, mean, std)(source)
-    tensor = tensor * torch.tensor(std)[:, None, None] + torch.tensor(mean)[:, None, None]
-    ax.imshow(tensor.clamp(0, 1).permute(1, 2, 0))
-    ax.set_title(plan[index].name)
-    ax.axis("off")
-plt.tight_layout()
-plt.show()
+# Set a specific validation filename before the first run if desired.
+# Once saved, keep this same image/class for all stage comparisons.
+EXAMPLE_FILENAME = None
+example_image_path, example_class = fixed_example(cfg, val_df, EXAMPLE_FILENAME)
+print("Fixed example:", example_image_path.name, "True species:", class_names[example_class])
+display(DisplayImage(filename=str(example_image_path), width=380))
 ''')
 
 descriptions = [
     ("Baseline: frozen backbone", "Only train the 200-class linear head. No random augmentation, dropout, weight decay or label smoothing. Both models use the same training budget; do not stop at a selected accuracy range."),
     ("Add backbone fine-tuning", "Keep the baseline preprocessing/loss. After 2 head-only warm-up epochs, unfreeze the backbone with a smaller learning rate. Compare with the frozen baseline for BOTH models."),
-    ("Add geometry augmentation", "Keep fine-tuning; add random resized crop, horizontal flip and mild rotation."),
-    ("Add color augmentation", "Keep fine-tuning + geometry; add mild ColorJitter."),
+    ("Add random crop", "Keep fine-tuning; add RandomResizedCrop only. Display five sampled parts of the SAME image before training both models. New random crops continue to be generated during every epoch."),
+    ("Add horizontal flip", "Keep fine-tuning + random crop; add horizontal flip with probability 0.5."),
+    ("Add mild rotation", "Keep all previous methods; add random rotation from -10 to +10 degrees."),
+    ("Add color augmentation", "Keep all previous methods; add mild ColorJitter."),
     ("Add dropout", "Keep all previous methods; add classifier dropout=0.3."),
     ("Add weight decay", "Keep all previous methods; add AdamW weight_decay=0.001."),
     ("Add label smoothing", "Keep all previous methods; add label_smoothing=0.1."),
@@ -161,6 +171,11 @@ descriptions = [
 for index, (title, description) in enumerate(descriptions):
     md(f"## Stage {index}. {title}\n\n{description}\n\nRun this cell after the previous paired stage. Completed runs skip; interrupted runs resume from the last completed epoch. Both models appear before moving to the next recipe.")
     code(f'''
+# SAME original + five examples of this method, then the full cumulative recipe.
+for preview_path in preview_stage({index}, example_image_path, cfg, n_examples=5):
+    display(DisplayImage(filename=str(preview_path)))
+''')
+    code(f'''
 stage_results = train_stage({index}, cfg, fit_df, val_df, class_names, manifest)
 display(stage_results[["architecture", "experiment", "val_top1", "val_average_per_class",
                        "delta_vs_previous_pp", "delta_vs_baseline_pp", "gap", "best_epoch"]].style.format({{
@@ -168,6 +183,15 @@ display(stage_results[["architecture", "experiment", "val_top1", "val_average_pe
     "delta_vs_previous_pp": "{{:+.2f}}", "delta_vs_baseline_pp": "{{:+.2f}}",
 }}))
 plot_results(cfg.output_dir)
+''')
+    first = (index // 5) * 5
+    last = min(first + 5, len(descriptions))
+    code(f'''
+# Explanation only: compare real trained checkpoints on the unchanged photo.
+# Untrained columns are placeholders; this does not modify or train the models.
+attention_path = plot_attention_progress(
+    cfg, example_image_path, example_class, stage_indices=range({first}, {last}))
+display(DisplayImage(filename=str(attention_path)))
 ''')
     if index == 0:
         code('''
@@ -199,6 +223,12 @@ for architecture in ARCHITECTURES:
         ["val_top1", "experiment"], ascending=[False, True]).iloc[0]
     print("Validation winner:", architecture, winner.experiment, f"{winner.val_top1:.2%}")
     plot_history(winner.checkpoint)
+# First five stages on exactly the same image and target class; later stages in
+# additional panels. These are real model explanations, not synthetic thermal data.
+for start in range(0, len(plan), 5):
+    panel = plot_attention_progress(cfg, example_image_path, example_class,
+                                    range(start, min(start + 5, len(plan))))
+    display(DisplayImage(filename=str(panel)))
 ''')
 md('''
 ## 6. Final Test evaluation - only after all paired stages
@@ -254,4 +284,4 @@ notebook = nbf.v4.new_notebook(cells=cells, metadata={
 })
 nbf.validate(notebook)
 nbf.write(notebook, ROOT / "Bird_Classification_Local_GPU.ipynb")
-print(f"Created {len(cells)} cells: 9 paired cumulative stages, MobileNetV1 / EfficientNetV2-S")
+print(f"Created {len(cells)} cells: 11 paired cumulative stages with fixed-image previews and Grad-CAM")

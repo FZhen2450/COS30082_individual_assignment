@@ -29,9 +29,10 @@ Dataset: the assignment-provided CUB-200 subset, not a newly downloaded split.
 ## Experiments
 
 Two architectures: **MobileNetV1 (width 1.0)** and **EfficientNetV2-S**.
-Nine cumulative recipes: frozen-backbone baseline, then add backbone fine-tuning,
-geometry, color, dropout, weight decay, label smoothing, random erasing and grayscale.
-Each notebook stage trains BOTH architectures before comparing them: 18 runs.
+Eleven cumulative recipes: frozen-backbone baseline, then add backbone fine-tuning,
+random crop, horizontal flip, rotation, color, dropout, weight decay, label smoothing,
+random erasing and grayscale. Crop, flip and rotation are separate steps.
+Each notebook stage trains BOTH architectures before comparing them: 22 runs.
 Each recipe retains all earlier settings but restarts from the same architecture's
 ImageNet weights and seed, rather than receiving extra epochs from an earlier run.
 If the teacher's two-model limit means **two training runs total**, confirm that
@@ -44,6 +45,20 @@ stages fine-tune after two classifier warm-up epochs. A baseline of 20-40% is an
 expectation, not a guarantee or an enforced stopping target. Improvements can be
 negative. Report both change from the previous recipe and total change from the
 baseline; this cumulative design does not measure each method in isolation.
+
+Before each stage, display the same validation photo plus five examples of the
+new augmentation and five draws from the full cumulative recipe. Crop coordinates
+appear on the original. Training samples new transforms on every image access,
+not just five previews. Non-image methods show settings instead of invented pixel
+filters. Preview RNG states are restored so viewing examples cannot change training.
+Crop follows the common deterministic resize to avoid fixed-center fallback on
+wide photos; preview boxes are mapped back onto the original coordinates.
+
+After each paired training, Grad-CAM explains the same image and true class for
+both models across groups of up to five checkpoints. This is class-related model
+attention, not thermal sensing or a training method. Colors are normalized per map,
+and do not prove an accuracy improvement. Missing stages remain blank. Explanations
+only use completed checkpoints and are cached against image/weight signatures.
 
 MobileNetV1 uses `timm==1.0.27`, model `mobilenetv1_100.ra4_e3600_r224_in1k`.
 It contains depthwise/pointwise blocks, global average pooling and a linear head.
@@ -95,6 +110,9 @@ validation accuracy changes and training curves. Inference uses CPU so that the
 GPU remains available for training. Before training the app explains that no
 checkpoint exists; it does not show invented results.
 
+The **Stage visuals** tab browses generated augmentation examples and Grad-CAM
+progress panels from `artifacts/visualizations/`.
+
 Final evaluation exports `deployment/bird_model.pth` with label mapping and
 preprocessing metadata. The teacher has approved Streamlit in place of the
 original Hugging Face requirement. Demonstrate the local application by running
@@ -125,6 +143,8 @@ Rebuild after training. Submit a separate report PDF and video link as required.
 - [MobileNetV1 paper](https://arxiv.org/abs/1704.04861).
 - [MobileNetV1 pretrained model card](https://huggingface.co/timm/mobilenetv1_100.ra4_e3600_r224_in1k).
 - [EfficientNetV2 documentation](https://docs.pytorch.org/vision/stable/models/efficientnetv2.html).
+- [Grad-CAM paper](https://arxiv.org/abs/1610.02391).
+- [RandomResizedCrop documentation](https://docs.pytorch.org/vision/stable/generated/torchvision.transforms.RandomResizedCrop.html).
 - [NVIDIA CUDA driver compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html).
 
 The pinned CUDA 11.8 build is chosen for the local RTX 3050 / driver 529.04,

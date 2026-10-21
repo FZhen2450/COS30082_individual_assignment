@@ -6,9 +6,14 @@
 - Preserved the original notebook and datasets.
 - Created the local GPU notebook and shared, commented PyTorch training module.
 - Limited architectures to MobileNetV1 (width 1.0) and EfficientNetV2-S.
-- Added nine cumulative recipes, each paired across BOTH architectures before
-  advancing: frozen baseline, fine-tuning, geometry, color, dropout, weight decay,
-  label smoothing, erasing and grayscale. Total: 18 runs.
+- Added eleven cumulative recipes, each paired across BOTH architectures before
+  advancing: frozen baseline, fine-tuning, random crop, horizontal flip, rotation,
+  color, dropout, weight decay, label smoothing, erasing and grayscale. Total: 22 runs.
+- Added original-plus-five examples before each stage and a second preview of
+  the full cumulative recipe; runtime augmentation samples are not limited to five.
+- Added fixed validation image/class, crop-box coordinates and real Grad-CAM
+  evolution panels across groups of five trained checkpoints for both architectures.
+- Added Streamlit Stage visuals to browse previews and model attention panels.
 - Added changes from the previous recipe and baseline, plus paired CSV/charts.
 - Baseline accuracy of 20-40% is an expectation only; no score is forced.
 - Added fixed grouped/stratified split, content fingerprints and duplicate reporting.
@@ -39,14 +44,22 @@ Verified locally on 2026-10-21:
 - Interrupted each tiny training run after an epoch checkpoint, resumed it, and
   verified completion of the next epoch with saved optimizer/scaler/RNG state.
 - Loaded each saved model for CPU inference and checked its Top-5 predictions.
-- Validated all 35 notebook cells with a dedicated cell for each paired stage.
+- Validated the notebook's 61 cells with preview, training/comparison and attention
+  cells for each paired stage.
 - Checked one-setting-at-a-time recipe accumulation, previous-stage ordering,
   paired CSV output and changes from the immediately previous recipe.
+- Checked five sampled crop boxes, more than five distinct runtime crops, fixed
+  validation example/class, unchanged source image and restored preview RNG states.
+- Checked Grad-CAM against a known red-square CNN, including frozen parameters,
+  empty positive maps, hook cleanup and restoration of model train/eval modes.
+- Rendered and inspected the crop examples and real-checkpoint attention panel;
+  completed stages have real explanations and missing stages remain blank.
 - Verified the 3,863 / 966 split retains all 200 classes with no identical content
   across fit/validation; recorded six duplicate training rows.
 - Streamlit AppTest: no exceptions in the untrained/empty state.
 - Streamlit AppTest with smoke-only checkpoints: model loading, experiment
-  tables, charts and learning-curve selection render without exceptions.
+  tables, charts, learning-curve selection, augmentation gallery and attention
+  progress panels render without exceptions.
 - Synthetic-fixture integration check: final validation selection lock, both
   200-class metrics, known-overlap exclusion, per-class/confusion/example reports,
   model export and cached rerun pass. The actual assignment Test set was not
@@ -65,7 +78,7 @@ scores must not be used in the report or deployed as a completed classifier.
 ## Remaining work for the assignment
 
 - Restart the notebook kernel to load the revised architecture and training plan.
-- Run all nine paired cumulative stages in the overwritten notebook.
+- Run all eleven paired cumulative stages in the overwritten notebook.
 - Review actual learning curves and validation comparisons.
 - Run final evaluation and export the real trained deployment checkpoint.
 - Run the trained Streamlit application and demonstrate uploads, predictions and
