@@ -8,7 +8,7 @@ output.parent.mkdir(exist_ok=True)
 files = [root / name for name in [
     "Bird_Classification_Local_GPU.ipynb", "birdlab.py", "app.py", "requirements.txt",
     "setup_gpu.ps1", "README.md", "ASSIGNMENT_GUIDE.md", "PROGRESS.md",
-    "Dockerfile", "HF_SPACE_README.md", ".gitignore", ".dockerignore",
+    ".gitignore",
     "train.txt", "test.txt",
 ]]
 files += sorted((root / "tools").glob("*.py"))

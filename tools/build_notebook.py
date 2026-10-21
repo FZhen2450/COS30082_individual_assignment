@@ -276,8 +276,9 @@ In a terminal run:
 ```
 Upload photos, inspect Top-5 scores, and compare the experiment results.
 
-For Hugging Face create a **Docker Space** and follow `HF_SPACE_README.md`.
-Hosting requires uploading the actual `deployment/bird_model.pth` after training.
+The teacher has approved Streamlit instead of the original Hugging Face
+requirement. Run the local app with the command above and open the URL printed
+in the terminal. The actual `deployment/bird_model.pth` is exported after training.
 
 Submission checklist:
 1. PDF report, at most 4 pages, with your name and ID; Methodology and Result and
@@ -285,8 +286,8 @@ Submission checklist:
    evidence of overfitting, ablation effects, error analysis and justified winner.
 2. Source code ZIP, generated with `.venv\\Scripts\\python.exe tools/package_source.py`.
 3. At most 10-minute video: concepts, model design, code, training/results and
-   Hugging Face web application demonstration. Include its YouTube link and
-   the Hugging Face link in the report.
+   Streamlit web application demonstration. Include the YouTube link and
+   Streamlit run instructions in the report; add an app URL if deployed online.
 
 Write the discussion after actual runs. Do not fill missing accuracy values with
 assumed numbers. See `PROGRESS.md` for the current implementation status.

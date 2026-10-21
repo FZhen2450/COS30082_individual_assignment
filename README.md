@@ -84,9 +84,14 @@ GPU remains available for training. Before training the app explains that no
 checkpoint exists; it does not show invented results.
 
 Final evaluation exports `deployment/bird_model.pth` with label mapping and
-preprocessing metadata. To host on Hugging Face, create a Docker Space and follow
-`HF_SPACE_README.md`. The application code is ready; actual hosting and a valid
-final model require completed training and a Hugging Face account.
+preprocessing metadata. The teacher has approved Streamlit in place of the
+original Hugging Face requirement. Demonstrate the local application by running
+the command above and opening the local URL printed in the terminal. A valid
+final model requires completed training. No Hugging Face account is needed.
+
+In the video, demonstrate photo upload, Top-5 predictions and experiment
+comparisons. Include the YouTube link and Streamlit run instructions in the
+report; an online application link can be added if you deploy it online.
 
 ## Submission and progress
 

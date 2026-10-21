@@ -12,7 +12,9 @@
 - Added both required metrics, final-test selection lock, per-class analysis,
   confusion matrices and prediction examples.
 - Added Streamlit photo upload, Top-5 inference and experiment comparisons.
-- Added local setup, source packaging and Hugging Face Docker Space instructions.
+- Added local setup, source packaging and Streamlit demonstration instructions.
+- Updated the submission workflow following the teacher's approval to use
+  Streamlit instead of Hugging Face; removed platform-specific deployment files.
 
 ## Validation status
 
@@ -51,10 +53,12 @@ scores must not be used in the report or deployed as a completed classifier.
 - Run the full baseline and ablation matrix in the new notebook.
 - Review actual learning curves and validation comparisons.
 - Run final evaluation and export the real trained deployment checkpoint.
-- Host the trained application on Hugging Face.
+- Run the trained Streamlit application and demonstrate uploads, predictions and
+  experiment comparisons in the video.
 - Write the <=4-page report with actual results, name and student ID.
 - Record the <=10-minute video and add both links to the report.
 - Rebuild the source ZIP after training to include the final results.
 
-No full training accuracy, final trained model or published Hugging Face URL is
-claimed at the implementation stage.
+No full training accuracy or final trained model is claimed at the implementation
+stage. The report should include the YouTube link and Streamlit run instructions;
+an online app link is optional if the application is deployed online.

@@ -1,4 +1,4 @@
-"""Local/Hugging Face Docker Space demo. Run: python -m streamlit run app.py."""
+"""Streamlit model demonstration. Run: python -m streamlit run app.py."""
 from pathlib import Path
 
 import pandas as pd
