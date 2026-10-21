@@ -1,2 +1,113 @@
-# COS30082_individual_assignment
-sharing my individual assignment progress
+# COS30082 - Bird Species Classification
+
+Local GPU training and a Streamlit demonstration for the assignment's 200 bird
+species. The original `Data_loading1.ipynb` remains unchanged. Start with
+**`Bird_Classification_Local_GPU.ipynb`**.
+
+## Quick start (Windows)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup_gpu.ps1
+.\.venv\Scripts\python.exe -m jupyterlab
+```
+
+In VS Code select `.venv\Scripts\python.exe` as the notebook kernel. Run its cells
+in order. A normal system `python` command selects Python 2.7 on this laptop.
+The setup script deliberately uses Python 3.13 and an isolated project environment.
+
+Required data (already present locally; excluded from Git):
+
+```text
+Train/       # 4,829 training JPEG images
+Test/        # 1,204 official test JPEG images
+train.txt    # filename integer_label, labels 0..199
+test.txt
+```
+
+Dataset: the assignment-provided CUB-200 subset, not a newly downloaded split.
+
+## Experiments
+
+Two architectures: **MobileNetV3-Large** and **EfficientNetV2-S**. Each has eight
+independent variants: baseline, geometry, color, grayscale, dropout, weight decay,
+label smoothing, and a combined recipe. This is 16 training runs over only two
+architectures. Each starts from the same architecture's ImageNet weights and seed.
+If the teacher's two-model limit means **two training runs total**, confirm that
+interpretation before running the ablation matrix: isolated ablation evidence
+requires multiple training runs of the same architecture.
+
+All runs share the data split, epoch budget, learning rate schedule, frozen
+BatchNorm running statistics, classifier warm-up, and validation early stopping.
+Single-factor variants are compared with their own baseline. The combined recipe
+also includes random erasing; its isolated contribution is not measured.
+No guarantee is made that an augmentation improves accuracy.
+
+Default: 224px, batch 8, gradient accumulation 4, mixed precision, 15 epochs max
+(2 head-only), backbone/head LR 3e-5/3e-4. Windows DataLoader workers = 0.
+The fixed low resolution is a documented compromise for 4 GB VRAM.
+On CUDA OOM, restart the kernel and set batch 4 / accumulation 8 with a new
+`output_dir`. Full experiments can take hours; check the first baseline first.
+
+## Evaluation integrity
+
+Only Train is partitioned into fit/validation. Byte-identical images are grouped
+by reserving repeated-content groups for fit before stratifying unique images. Three identical-image pairs inside Train have conflicting
+labels; these are preserved and recorded in `split.json`. The split is 3,863 fit / 966 validation images. Each class appears in both;
+the six ambiguous duplicate rows are reserved for fit.
+
+Four Test images are byte-identical to Train. The final evaluation reports both
+the official complete-set result and the supplementary clean subset result.
+Report this issue rather than silently changing the official test data.
+
+Required metrics are overall **Top-1 accuracy** and **Average accuracy per class**
+(macro recall across 200 true classes). Validation selects checkpoints and the
+deployment model. Final test access locks the study against further training.
+Use a new output directory for a new pre-test study; test results already seen
+cannot become an unbiased validation source merely by changing the directory.
+
+`artifacts/` contains split/configuration records, epoch histories, best/last
+checkpoints, accuracy/delta plots, `comparison.csv`, and final test metrics,
+per-class CSVs, confusion matrices and prediction examples. `last.pth` supports
+continuation from the last finished epoch, including optimizer/scaler/RNG state.
+Interrupted partially completed epochs are replayed. Completed experiments skip.
+Checkpoints are local project artifacts; load only ones you trust.
+
+## Streamlit
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app.py
+```
+
+After training: upload photos, inspect the Top-5 species probabilities, browse
+validation accuracy changes and training curves. Inference uses CPU so that the
+GPU remains available for training. Before training the app explains that no
+checkpoint exists; it does not show invented results.
+
+Final evaluation exports `deployment/bird_model.pth` with label mapping and
+preprocessing metadata. To host on Hugging Face, create a Docker Space and follow
+`HF_SPACE_README.md`. The application code is ready; actual hosting and a valid
+final model require completed training and a Hugging Face account.
+
+## Submission and progress
+
+See [ASSIGNMENT_GUIDE.md](ASSIGNMENT_GUIDE.md) for the assignment requirements
+and report structure; see [PROGRESS.md](PROGRESS.md) for work completed so far.
+
+```powershell
+.\.venv\Scripts\python.exe tools/package_source.py
+```
+
+This builds `submission/COS30082_source.zip` with source and any available
+experiment results, excluding images, environments, pretrained caches and weights.
+Rebuild after training. Submit a separate report PDF and video link as required.
+
+## References
+
+- Assignment brief: `Assignment1_v2.pdf`, pages 1-3.
+- [Official paired PyTorch / torchvision CUDA wheels](https://pytorch.org/get-started/previous-versions/).
+- [MobileNetV3 documentation](https://docs.pytorch.org/vision/stable/models/mobilenetv3.html).
+- [EfficientNetV2 documentation](https://docs.pytorch.org/vision/stable/models/efficientnetv2.html).
+- [NVIDIA CUDA driver compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html).
+
+The pinned CUDA 11.8 build is chosen for the local RTX 3050 / driver 529.04,
+instead of changing the existing global CPU-only PyTorch installation.

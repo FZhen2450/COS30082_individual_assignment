@@ -1,0 +1,14 @@
+# Training torch/torchvision CUDA wheels are installed separately by setup_gpu.ps1.
+# These compatible versions also permit CPU deployment in a Hugging Face Docker Space.
+torch==2.7.1
+torchvision==0.22.1
+numpy>=2.1,<3
+pandas>=2.2,<3
+Pillow>=11,<13
+scikit-learn>=1.6,<2
+matplotlib>=3.9,<4
+tqdm>=4.67,<5
+streamlit>=1.49,<2
+nbformat>=5.10,<6
+ipykernel>=6.29,<8
+jupyterlab>=4.3,<5

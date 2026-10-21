@@ -1,0 +1,11 @@
+.git
+.venv
+.tools
+.github-check
+.cache
+Train
+Test
+*.zip
+smoke_artifacts
+artifacts
+__pycache__

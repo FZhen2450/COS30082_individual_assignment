@@ -1,0 +1,16 @@
+Train/
+Test/
+*.zip
+.venv/
+.tools/
+.github-check/
+.cache/
+__pycache__/
+.ipynb_checkpoints/
+artifacts/
+smoke_artifacts/
+deployment/*.pth
+*.tmp
+*.log
+.env
+!.env.example
