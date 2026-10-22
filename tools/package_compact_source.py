@@ -7,7 +7,7 @@ output = root / "submission/COS30082_compact_source.zip"
 output.parent.mkdir(exist_ok=True)
 files = [root / name for name in [
     "Bird_Classification_Compact_GPU.ipynb", "birdlab_compact.py", "birdlab.py",
-    "app_compact.py", "COMPACT_GUIDE.md", "ASSIGNMENT_GUIDE.md", "requirements.txt",
+    "app_compact.py", "README.md", "requirements.txt",
     "setup_gpu.ps1", "train.txt", "test.txt", "tools/build_compact_notebook.py",
     "tools/verify_compact.py", "tools/package_compact_source.py"]]
 for pattern in ["*.csv", "*.json", "*.png"]:

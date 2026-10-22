@@ -96,7 +96,7 @@ and compare with ground truth. Neither Top-1 confidence nor one successful photo
 measures real-world accuracy. Do not present smoke-test scores as experiment results.
 
 After training: `.\\.venv\\Scripts\\python.exe tools/package_compact_source.py`.
-See COMPACT_GUIDE.md for settings, limitations and the separate source ZIP.
+See README.md for settings, limitations and the separate source ZIP.
 ''')
 nb = nbf.v4.new_notebook(cells=cells, metadata={
     "kernelspec": {"display_name": "Python (.venv GPU)", "language": "python", "name": "python3"},

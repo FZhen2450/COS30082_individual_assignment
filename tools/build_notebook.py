@@ -20,7 +20,7 @@ Baseline accuracy is measured honestly; 20–40% cannot be guaranteed or forced.
 
 This revision writes only to **artifacts_retrain_v3**. Old `artifacts` runs are
 preserved and excluded from new comparisons and Streamlit. Stop old training and
-**restart the kernel** before starting. See ASSIGNMENT_GUIDE.md for submission.
+**restart the kernel** before starting. See README.md for submission.
 ''')
 md('''
 ## 1. Local GPU environment
@@ -200,7 +200,7 @@ if PHOTO_PATH:
 ''')
 md('''
 ## 8. Submission
-Follow ASSIGNMENT_GUIDE.md: report PDF (Methodology; Result and Discussion), code
+Follow README.md: report PDF (Methodology; Result and Discussion), code
 ZIP and presentation video/link. Fill name/ID. Teacher approved Streamlit; keep
 that approval. After training run `.\\.venv\\Scripts\\python.exe tools/package_source.py`
 to include this study's results. Dataset images and model weights are excluded;

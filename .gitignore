@@ -14,5 +14,6 @@ smoke_artifacts/
 deployment/*.pth
 *.tmp
 *.log
+tmp/
 .env
 !.env.example
