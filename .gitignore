@@ -9,6 +9,7 @@ __pycache__/
 .ipynb_checkpoints/
 artifacts/
 artifacts_retrain_v3/
+artifacts_compact_v1/
 smoke_artifacts/
 deployment/*.pth
 *.tmp
