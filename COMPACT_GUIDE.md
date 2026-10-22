@@ -16,7 +16,7 @@
 
 每轮从相同 ImageNet 初始权重和 seed 开始，不继承前一轮鸟 checkpoint。不同轮同时改变冻结策略、预算和正则化，属于完整配方比较，不能把提升全部归功于 random crop。三轮都展示实际 accuracy、上轮/基准差值和截至目前最佳；后者单调不降只是择优保留，不是声称每个配方都提高。
 
-**90% 是目标而非承诺。** Train Accuracy 超过 90% 不等于 Val/Test 超过 90%。固定 split、防止内容泄漏，所有阶段完成才打开 Test。保留官方和去掉四张 Train/Test 重复图片的指标。不要为了达标挑删困难 Test 样本或反复根据 Test 调参。
+Train Accuracy 超过 90% 不等于 Val/Test 超过 90%。固定 split、防止内容泄漏，所有阶段完成才打开 Test。保留官方和去掉四张 Train/Test 重复图片的指标。不要为了达标挑删困难 Test 样本或反复根据 Test 调参。
 
 不使用上下翻转、大角度旋转、反色/色层、灰度或擦除，以减少破坏羽毛颜色与姿态。轻微 ColorJitter 参数为 brightness/contrast/saturation 0.1、hue 0.015；crop ratio 0.9–1.1，flip p=0.5。这些选择受旧 validation 结果启发，新实验不是完全独立的验证发现，应在报告说明。
 
