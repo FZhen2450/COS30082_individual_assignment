@@ -9,6 +9,8 @@ A Streamlit app that recognises 200 bird species. Choose **Version 1** or
 Each option loads the checkpoint with the highest validation Top-1 accuracy for
 that architecture and version. The app defaults to Version 2 EfficientNetV2-S.
 
+https://cos30082individualassignment-medgwuczqvy53a3gw73dmu.streamlit.app/
+
 ## Run or deploy
 
 Use Python 3.11 or 3.12 in a separate environment:
@@ -101,14 +103,3 @@ The main branch contains the deployment app and its selected weights. Training
 notebooks, datasets, reports, caches and intermediate checkpoints are kept outside
 this deployment repository.
 
-## Prediction limits
-
-Upload a JPG, PNG or WebP photograph. The app applies the selected checkpoint's
-saved image size and normalisation, then ranks its 200 known species. Probabilities
-describe that image and are not dataset accuracy. Unfamiliar species, non-bird
-images or difficult photographs can produce confident errors.
-
-## Architecture references
-
-- Howard et al. (2017), [MobileNets](https://arxiv.org/abs/1704.04861).
-- Tan and Le (2021), [EfficientNetV2](https://arxiv.org/abs/2104.00298).
