@@ -11,22 +11,6 @@ that architecture and version. The app defaults to Version 2 EfficientNetV2-S.
 
 https://cos30082individualassignment-medgwuczqvy53a3gw73dmu.streamlit.app/
 
-## Run or deploy
-
-Use Python 3.11 or 3.12 in a separate environment:
-
-```bash
-python -m venv .venv
-# Activate the environment, then:
-python -m pip install -r requirements.txt
-python -m streamlit run app.py
-```
-
-For Streamlit Community Cloud, choose this repository, branch `main`, entrypoint
-`app.py`, and Python 3.11 or 3.12. Dependencies use CPU PyTorch wheels. The four
-selected checkpoints are included, so startup needs no training data, GPU or
-pretrained-weight download. The app loads a model when a photo is uploaded.
-
 ## Final training and Test results
 
 Training accuracy below uses deterministic evaluation of the training images at
