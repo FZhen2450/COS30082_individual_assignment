@@ -61,19 +61,6 @@ Both versions use ImageNet transfer learning, a new 200-output classifier,
 cross-entropy loss, AdamW, cosine learning-rate decay, mixed precision, fixed
 BatchNorm running statistics and validation-based early stopping.
 
-## Why the app defaults to Version 2 EfficientNet
-
-V2 EfficientNetV2-S has the highest validation accuracy (**79.92%**) and reaches
-**79.15% Test Top-1**, improving V1 by **2.74 percentage points**. MobileNetV1's
-Test accuracy declines from 59.05% to 57.64%, so the revised recipe does not improve
-both architectures. The app keeps the best of each architecture for comparison.
-
-V2 changes augmentation, resolution and training settings together. Its gain
-describes the complete recipe. The two versions reuse Test during project
-development, so an untouched image set is needed for independent confirmation.
-Fewer V2 runs reduce total recorded training time, while individual fine-tuning
-runs take longer. These times do not measure inference latency.
-
 ## Repository contents
 
 - `app.py`: version/model selection, photo upload and Top-5 predictions.
