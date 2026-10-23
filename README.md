@@ -1,101 +1,114 @@
-# COS30082 Bird Species Classification
+# Bird Species Classifier
 
-Fa Zhen NG · 104400141
+COS30082 Applied Machine Learning individual assignment
 
-Two architectures: **MobileNetV1** and **EfficientNetV2-S**. Teacher-approved
-**Streamlit** replaces the original Hugging Face demonstration requirement.
+Fa Zhen NG, student ID 104400141
 
-## Run
+A Streamlit app that recognises 200 bird species. Choose **Version 1** or
+**Version 2**, then select either **EfficientNetV2-S (best)** or **MobileNetV1 (best)**.
+Each option loads the checkpoint with the highest validation Top-1 accuracy for
+that architecture and version. The app defaults to Version 2 EfficientNetV2-S.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup_gpu.ps1
+## Run or deploy
+
+Use Python 3.11 or 3.12 in a separate environment:
+
+```bash
+python -m venv .venv
+# Activate the environment, then:
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
-Select `.venv\Scripts\python.exe` as the notebook kernel. Run one GPU training
-task at a time; global `python` is Python 2.7 on this laptop.
+For Streamlit Community Cloud, choose this repository, branch `main`, entrypoint
+`app.py`, and Python 3.11 or 3.12. Dependencies use CPU PyTorch wheels. The four
+selected checkpoints are included, so startup needs no training data, GPU or
+pretrained-weight download. The app loads a model when a photo is uploaded.
 
-| Workflow | Notebook | Results | Streamlit |
-|---|---|---|---|
-| Detailed, 13 paired stages | `Bird_Classification_Local_GPU.ipynb` | `artifacts_retrain_v3/` | `app.py` |
-| Compact, 3 paired rounds | `Bird_Classification_Compact_GPU.ipynb` | `artifacts_compact_v1/` | `app_compact.py` |
+## Final training and Test results
 
-The workflows have separate checkpoints and histories. Keep their default output
-directories to avoid mixing results. Both use the same input files: `Train/`,
-`Test/`, `train.txt`, `test.txt`. Original PDF and Colab notebook remain unchanged.
+Training accuracy below uses deterministic evaluation of the training images at
+the selected checkpoint, without random augmentation or dropout. Validation
+selects checkpoints within each version before its Test evaluation. Test Top-1
+is overall accuracy. Mean per-class accuracy gives each of the 200 species equal weight.
 
-```powershell
-.\.venv\Scripts\python.exe -m streamlit run app.py
-# For the compact study instead:
-.\.venv\Scripts\python.exe -m streamlit run app_compact.py
-```
+| Version | Model | Train Top-1 | Validation Top-1 | Test Top-1 | Test mean per-class |
+|---|---|---:|---:|---:|---:|
+| V1 | EfficientNetV2-S | 99.64% | 76.09% | 76.41% | 75.90% |
+| V1 | MobileNetV1 | 99.92% | 61.49% | 59.05% | 58.43% |
+| V2 | EfficientNetV2-S | 99.92% | 79.92% | 79.15% | 78.51% |
+| V2 | MobileNetV1 | 99.43% | 58.28% | 57.64% | 56.63% |
 
-Both apps support photo uploads, Top-5 predictions and comparison/epoch tables.
-They prefer the exported validation winner when available. A photo's probability
-is not dataset accuracy; the model can only choose among its 200 known species.
+### Selected checkpoints
 
-## Experiments
+| Version | Model | Validation-selected recipe | Best epoch / epochs run |
+|---|---|---|---:|
+| V1 | EfficientNetV2-S | `03_horizontal_flip` | 14 / 15 |
+| V1 | MobileNetV1 | `01_fine_tune` | 15 / 15 |
+| V2 | EfficientNetV2-S | `01_random_augmentation` | 25 / 33 |
+| V2 | MobileNetV1 | `01_random_augmentation` | 32 / 35 |
 
-Detailed: frozen baseline → fine-tuning → crop → horizontal flip → vertical flip
-→ rotation → ColorJitter → inversion/tints → dropout → weight decay → label
-smoothing → erasing → grayscale. Each step trains both architectures from the
-same original ImageNet weights and seed. Settings are cumulative, so changes
-measure conditional effects, not each method's isolated benefit.
+Both versions use 3,863 training images, 966 validation images and the official
+1,204-image Test set, with the same seed-42 split and class order. Image hashes
+prevent identical content crossing training and validation. Four official Test
+images overlap Train. Excluding them, EfficientNetV2-S reaches **76.67%** Top-1 /
+**76.17%** mean per-class in V1, and **79.42%** / **78.79%** in V2.
 
-Detailed defaults: 224px, batch 8, accumulation 4, 15 epochs maximum, 2 warm-up
-epochs, patience 5, head LR 3e-4, backbone LR 3e-5, AMP, fixed BatchNorm statistics.
+## Training choices
 
-Compact: frozen baseline → moderate crop/flip/color plus fine-tuning → light
-regularization and longer training. Defaults: 384px, batch 2, accumulation 16,
-15/35/60 maximum epochs, 3 warm-up epochs, backbone LR 1e-5. Crops retain 85–100%
-area; no inversion, vertical flips or large rotations. This compares whole recipes
-with different budgets. Higher accuracy or a 90% target cannot be guaranteed.
+**Version 1** runs 13 cumulative recipes for each architecture, covering a frozen
+baseline, backbone fine-tuning, crops and flips, followed by stronger image
+transformations and regularisers. Every recipe restarts from ImageNet weights.
+It uses 224-pixel inputs, up to 15 epochs, two classifier warm-up epochs for
+fine-tuning, initial backbone/head learning rates 3e-5 / 3e-4, and batch 8 with
+four accumulation steps. Recorded total: **12.71 hours for 26 runs**.
 
-Train/Val Accuracy and Loss appear every epoch. `Train Eval Accuracy` disables
-random augmentation/dropout; its difference from validation is the clean gap.
-Tables report accuracy in percent and changes in percentage points.
+**Version 2** tests a frozen baseline and one mild augmentation/fine-tuning
+recipe per architecture. Crops retain 85–100% of the image, with horizontal flips
+and mild colour jitter. It removes vertical flips, rotation, inversion, tints,
+erasing and grayscale, and sets added dropout, weight decay and label smoothing
+to zero. Inputs increase to 384 pixels, the fine-tuning budget increases to 35
+epochs with three warm-up epochs, backbone LR drops to 1e-5, and batch 2 uses
+16 accumulation steps. Recorded total: **7.78 hours for four runs**.
 
-## Detailed study results
+Both versions use ImageNet transfer learning, a new 200-output classifier,
+cross-entropy loss, AdamW, cosine learning-rate decay, mixed precision, fixed
+BatchNorm running statistics and validation-based early stopping.
 
-All 26 detailed runs and final evaluation are saved locally. Best validation
-recipe: **EfficientNetV2-S with fine-tuning, random crop and horizontal flip**.
+## Why the app defaults to Version 2 EfficientNet
 
-| Metric | Official Test | Test excluding four Train overlaps |
-|---|---:|---:|
-| Top-1 accuracy | 76.41% | 76.67% |
-| Average accuracy per class | 75.90% | 76.17% |
+V2 EfficientNetV2-S has the highest validation accuracy (**79.92%**) and reaches
+**79.15% Test Top-1**, improving V1 by **2.74 percentage points**. MobileNetV1's
+Test accuracy declines from 59.05% to 57.64%, so the revised recipe does not improve
+both architectures. The app keeps the best of each architecture for comparison.
 
-Fit/validation: 3,863/966 images, 200 classes. Six conflicting duplicate training
-rows stay in fit; identical content never crosses fit/validation. Test has 1,204
-images. Selection uses validation; finalization locks choices before Test access.
-Detailed report uses this study only, not compact or smoke-test results.
+V2 changes augmentation, resolution and training settings together. Its gain
+describes the complete recipe. The two versions reuse Test during project
+development, so an untouched image set is needed for independent confirmation.
+Fewer V2 runs reduce total recorded training time, while individual fine-tuning
+runs take longer. These times do not measure inference latency.
 
-## Submission
+## Repository contents
 
-The assignment requires a **report PDF of at most 4 pages**, name/ID, two main
-sections (Methodology; Result and Discussion), both required metrics, one code ZIP,
-and a presentation video of at most 10 minutes. Include the YouTube link and the
-teacher-approved Streamlit demonstration details. The editable report is
-`submission/COS30082_Report.docx`; add the video link after recording and export
-to PDF before submission. The deleted guide/progress files were optional notes.
+- `app.py`: version/model selection, photo upload and Top-5 predictions.
+- `predictor.py`: standalone CPU model reconstruction and preprocessing.
+- `requirements.txt`: deployment dependencies.
+- `.streamlit/config.toml`: Streamlit configuration.
+- `models/manifest.json`: selected recipes, final metrics and checkpoint hashes.
+- `models/version_1/` and `models/version_2/`: two selected checkpoints per version.
 
-```powershell
-.\.venv\Scripts\python.exe tools/package_source.py
-# Separate compact source package:
-.\.venv\Scripts\python.exe tools/package_compact_source.py
-```
+The main branch contains the deployment app and its selected weights. Training
+notebooks, datasets, reports, caches and intermediate checkpoints are kept outside
+this deployment repository.
 
-ZIPs include source and their own study's available CSV/JSON/PNG evidence, excluding
-dataset photos, weights, environments and caches. Rebuild after changes. Deployment
-weights are `<study>/deployment/bird_model.pth`; provide separately if requested.
+## Prediction limits
 
-## Project files
+Upload a JPG, PNG or WebP photograph. The app applies the selected checkpoint's
+saved image size and normalisation, then ranks its 200 known species. Probabilities
+describe that image and are not dataset accuracy. Unfamiliar species, non-bird
+images or difficult photographs can produce confident errors.
 
-- `birdlab.py`, `bird_visuals.py`, `app.py`: detailed training, augmentation previews and app.
-- `birdlab_compact.py`, `app_compact.py`: isolated compact recipe and app.
-- `tools/`: notebook builders, packaging, verification and report generation.
-- `submission/`: report and source ZIPs; submit files as required by Canvas.
-- `logs/`, `smoke_artifacts/`: implementation checks, never assignment scores.
-- `artifacts/`, `deployment/`: older local artifacts, preserved for reference.
+## Architecture references
 
-ImageNet caches, datasets and local training outputs stay out of Git. Report
-rendering intermediates stay in `tmp/report_qa/`.
+- Howard et al. (2017), [MobileNets](https://arxiv.org/abs/1704.04861).
+- Tan and Le (2021), [EfficientNetV2](https://arxiv.org/abs/2104.00298).

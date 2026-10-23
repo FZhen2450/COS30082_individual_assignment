@@ -1,0 +1,74 @@
+{
+  "selection": "Highest validation Top-1 per architecture within each version",
+  "class_count": 200,
+  "versions": {
+    "version_1": {
+      "training_runs": 26,
+      "training_hours": 12.712137427194442,
+      "models": {
+        "efficientnet_v2_s": {
+          "file": "models/version_1/efficientnet_v2_s.pth",
+          "recipe": "03_horizontal_flip",
+          "best_epoch": 14,
+          "epochs_run": 15,
+          "training_top1": 0.9963758736733109,
+          "validation_top1": 0.7608695652173914,
+          "validation_average_per_class": 0.76,
+          "test_top1": 0.7641196013289037,
+          "test_average_per_class": 0.7590238095238095,
+          "test_top1_excluding_overlaps": 0.7666666666666667,
+          "test_average_per_class_excluding_overlaps": 0.7616785714285714,
+          "sha256": "f942b60ea11f317f9771c161bd91f94f58ff1e152f9b693fca492d6b3a3d28aa"
+        },
+        "mobilenet_v1": {
+          "file": "models/version_1/mobilenet_v1.pth",
+          "recipe": "01_fine_tune",
+          "best_epoch": 15,
+          "epochs_run": 15,
+          "training_top1": 0.9992234015014237,
+          "validation_top1": 0.6149068322981367,
+          "validation_average_per_class": 0.611,
+          "test_top1": 0.590531561461794,
+          "test_average_per_class": 0.5843095238095237,
+          "test_top1_excluding_overlaps": 0.5925,
+          "test_average_per_class_excluding_overlaps": 0.5864285714285714,
+          "sha256": "b924f27ac3f361800d8256276259a882463ac2d583f19122e879ca73519aad8f"
+        }
+      }
+    },
+    "version_2": {
+      "training_runs": 4,
+      "training_hours": 7.775581930750009,
+      "models": {
+        "efficientnet_v2_s": {
+          "file": "models/version_2/efficientnet_v2_s.pth",
+          "recipe": "01_random_augmentation",
+          "best_epoch": 25,
+          "epochs_run": 33,
+          "training_top1": 0.9992234015014237,
+          "validation_top1": 0.7991718426501035,
+          "validation_average_per_class": 0.7965833333333333,
+          "test_top1": 0.7915282392026578,
+          "test_average_per_class": 0.7851190476190476,
+          "test_top1_excluding_overlaps": 0.7941666666666667,
+          "test_average_per_class_excluding_overlaps": 0.787904761904762,
+          "sha256": "8be71d9f6e892cabb327c834550cdfc905842c0a682e2c97e7db0f909f27ff05"
+        },
+        "mobilenet_v1": {
+          "file": "models/version_2/mobilenet_v1.pth",
+          "recipe": "01_random_augmentation",
+          "best_epoch": 32,
+          "epochs_run": 35,
+          "training_top1": 0.9943049443437743,
+          "validation_top1": 0.582815734989648,
+          "validation_average_per_class": 0.5798333333333333,
+          "test_top1": 0.5764119601328903,
+          "test_average_per_class": 0.5663392857142857,
+          "test_top1_excluding_overlaps": 0.5783333333333334,
+          "test_average_per_class_excluding_overlaps": 0.5684583333333333,
+          "sha256": "4ec7a377cdf81b153f0525fe6dcca4b63e29869598e71b47b4f7c4fc239f1e0f"
+        }
+      }
+    }
+  }
+}
